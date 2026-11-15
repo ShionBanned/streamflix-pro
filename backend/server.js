@@ -14,144 +14,187 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 4000;
 
-// Configuración de Middlewares
-app.use(cors({
-  origin: '*',
-  methods: ['GET', 'POST', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Range', 'Authorization'],
-  exposedHeaders: ['Content-Range', 'Accept-Ranges', 'Content-Length', 'Content-Type'],
-}));
+app.use(
+  cors({
+    origin: '*',
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Range', 'Authorization'],
+    exposedHeaders: ['Content-Range', 'Accept-Ranges', 'Content-Length', 'Content-Type'],
+  })
+);
 
 app.use(express.json());
 
 // -------------------------------------------------------------
-// RUTAS MÓDULO A: Catálogo, Metadatos, Anime y Hubs TMDB
+// RUTAS MÓDULO A: Catálogo, Explorador por Décadas/Géneros, Anime y Hubs TMDB
 // -------------------------------------------------------------
 
-// Tendencias globales de la semana
 app.get('/api/tmdb/trending', async (req, res) => {
   try {
-    const { type = 'all', window = 'week', page = 1 } = req.query;
-    const data = await tmdbService.getTrending(type, window, Number(page));
+    const { type = 'all', window = 'week', page = 1, lang = 'es-MX' } = req.query;
+    const data = await tmdbService.getTrending(type, window, Number(page), lang);
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: 'Error obteniendo tendencias', message: err.message });
   }
 });
 
-// Películas en cartelera / recientes
 app.get('/api/tmdb/now-playing', async (req, res) => {
   try {
-    const { page = 1 } = req.query;
-    const data = await tmdbService.getNowPlaying(Number(page));
+    const { page = 1, lang = 'es-MX' } = req.query;
+    const data = await tmdbService.getNowPlaying(Number(page), lang);
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: 'Error obteniendo cartelera', message: err.message });
   }
 });
 
-// Películas populares
 app.get('/api/tmdb/popular-movies', async (req, res) => {
   try {
-    const { page = 1 } = req.query;
-    const data = await tmdbService.getPopularMovies(Number(page));
+    const { page = 1, lang = 'es-MX' } = req.query;
+    const data = await tmdbService.getPopularMovies(Number(page), lang);
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: 'Error obteniendo películas populares', message: err.message });
   }
 });
 
-// Series populares
 app.get('/api/tmdb/popular-series', async (req, res) => {
   try {
-    const { page = 1 } = req.query;
-    const data = await tmdbService.getPopularSeries(Number(page));
+    const { page = 1, lang = 'es-MX' } = req.query;
+    const data = await tmdbService.getPopularSeries(Number(page), lang);
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: 'Error obteniendo series populares', message: err.message });
   }
 });
 
-// Películas mejor valoradas
 app.get('/api/tmdb/top-rated', async (req, res) => {
   try {
-    const { page = 1 } = req.query;
-    const data = await tmdbService.getTopRated(Number(page));
+    const { page = 1, lang = 'es-MX' } = req.query;
+    const data = await tmdbService.getTopRated(Number(page), lang);
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: 'Error obteniendo mejor valoradas', message: err.message });
   }
 });
 
-// Buscador universal
+// Explorador avanzado por tipo, género, década (70s, 80s, 90s, 2000s, 2010s, 2020s) y cadena de TV
+app.get('/api/tmdb/discover', async (req, res) => {
+  try {
+    const {
+      type = 'movie',
+      genre = null,
+      decade = null,
+      network = null,
+      sortBy = 'popularity.desc',
+      page = 1,
+      lang = 'es-MX',
+    } = req.query;
+
+    const data = await tmdbService.discoverCatalog({
+      type,
+      genre,
+      decade,
+      network,
+      sortBy,
+      page: Number(page),
+      language: lang,
+    });
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: 'Error explorando catálogo', message: err.message });
+  }
+});
+
+// Secciones curadas de Películas
+app.get('/api/tmdb/movie-sections', async (req, res) => {
+  try {
+    const { lang = 'es-MX' } = req.query;
+    const sections = await tmdbService.getMovieSections(lang);
+    res.json(sections);
+  } catch (err) {
+    res.status(500).json({ error: 'Error obteniendo secciones de películas', message: err.message });
+  }
+});
+
+// Secciones curadas de Series (incluye Clásicos de los 90s y 80s)
+app.get('/api/tmdb/series-sections', async (req, res) => {
+  try {
+    const { lang = 'es-MX' } = req.query;
+    const sections = await tmdbService.getSeriesSections(lang);
+    res.json(sections);
+  } catch (err) {
+    res.status(500).json({ error: 'Error obteniendo secciones de series', message: err.message });
+  }
+});
+
 app.get('/api/tmdb/search', async (req, res) => {
   try {
-    const { query = '', page = 1 } = req.query;
-    const data = await tmdbService.searchMulti(query, Number(page));
+    const { query = '', page = 1, lang = 'es-MX' } = req.query;
+    const data = await tmdbService.searchMulti(query, Number(page), lang);
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: 'Error en búsqueda', message: err.message });
   }
 });
 
-// Detalle de película
 app.get('/api/tmdb/movie/:id', async (req, res) => {
   try {
-    const data = await tmdbService.getMovieDetails(req.params.id);
+    const { lang = 'es-MX' } = req.query;
+    const data = await tmdbService.getMovieDetails(req.params.id, lang);
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: 'Error obteniendo detalle de película', message: err.message });
   }
 });
 
-// Detalle de serie
 app.get('/api/tmdb/tv/:id', async (req, res) => {
   try {
-    const data = await tmdbService.getTvDetails(req.params.id);
+    const { lang = 'es-MX' } = req.query;
+    const data = await tmdbService.getTvDetails(req.params.id, lang);
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: 'Error obteniendo detalle de serie', message: err.message });
   }
 });
 
-// Detalle de temporada de serie
 app.get('/api/tmdb/tv/:id/season/:seasonNumber', async (req, res) => {
   try {
-    const data = await tmdbService.getSeasonDetails(req.params.id, req.params.seasonNumber);
+    const { lang = 'es-MX' } = req.query;
+    const data = await tmdbService.getSeasonDetails(req.params.id, req.params.seasonNumber, lang);
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: 'Error obteniendo episodios de temporada', message: err.message });
   }
 });
 
-// MÓDULO ANIME: Descubrimiento de anime japonés estilo Crunchyroll
 app.get('/api/catalog/anime', async (req, res) => {
   try {
-    const { page = 1 } = req.query;
-    const data = await tmdbService.getAnime(Number(page));
+    const { page = 1, lang = 'es-MX' } = req.query;
+    const data = await tmdbService.getAnime(Number(page), lang);
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: 'Error obteniendo catálogo de anime', message: err.message });
   }
 });
 
-// MÓDULO HUBS: Filtrar catálogo por plataforma (Netflix, Prime, Disney+, Max, Apple TV+, Crunchyroll)
 app.get('/api/catalog/provider/:providerId', async (req, res) => {
   try {
     const { providerId } = req.params;
-    const { page = 1 } = req.query;
-    const data = await tmdbService.getByProvider(Number(providerId), Number(page));
+    const { page = 1, lang = 'es-MX' } = req.query;
+    const data = await tmdbService.getByProvider(Number(providerId), Number(page), lang);
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: 'Error obteniendo catálogo de la plataforma', message: err.message });
   }
 });
 
-// MÓDULO TRÁILERS: Obtener tráiler oficial de YouTube
 app.get('/api/catalog/:type/:tmdbId/videos', async (req, res) => {
   try {
     const { type, tmdbId } = req.params;
-    const trailer = await tmdbService.getTrailers(type, tmdbId);
+    const { lang = 'es-MX' } = req.query;
+    const trailer = await tmdbService.getTrailers(type, tmdbId, lang);
     res.json({ trailer });
   } catch (err) {
     res.status(500).json({ error: 'Error obteniendo tráiler', message: err.message });
@@ -159,34 +202,41 @@ app.get('/api/catalog/:type/:tmdbId/videos', async (req, res) => {
 });
 
 // -------------------------------------------------------------
-// RUTAS MÓDULO B: Motor Híbrido de Video (Router Inteligente)
+// RUTAS MÓDULO B: Motor Híbrido Universal de Video (TMDB + IMDb Dual Index)
 // -------------------------------------------------------------
 
-/**
- * Resuelve la fuente óptima (P2P vs AutoEmbed) para cualquier película, serie o anime
- */
 app.get('/api/resolve', async (req, res) => {
   try {
-    let { tmdbId, imdbId, type = 'movie', season, episode, originalLanguage } = req.query;
+    let {
+      tmdbId,
+      imdbId,
+      type = 'movie',
+      season,
+      episode,
+      originalLanguage,
+      preferredLanguage = 'latino',
+    } = req.query;
 
     if (!imdbId && tmdbId) {
       imdbId = await tmdbService.getImdbId(type, tmdbId);
     }
 
-    if (!imdbId) {
+    if (!imdbId && !tmdbId) {
       return res.status(400).json({
-        error: 'No se pudo obtener el imdb_id para este título',
+        error: 'No se pudo obtener el identificador para este título',
         tmdbId,
         type,
       });
     }
 
     const resolution = await torrentio.getTorrentioStreams({
-      imdbId,
+      imdbId: imdbId || null,
+      tmdbId,
       type,
       season: season ? Number(season) : null,
       episode: episode ? Number(episode) : null,
       originalLanguage,
+      preferredLanguage,
     });
 
     res.json(resolution);
@@ -197,10 +247,9 @@ app.get('/api/resolve', async (req, res) => {
 });
 
 // -------------------------------------------------------------
-// RUTAS P2P: Servidor de Streaming WebTorrent con HTTP Range 206
+// RUTAS P2P: Servidor de Streaming WebTorrent con HTTP Range 206 + FFmpeg
 // -------------------------------------------------------------
 
-// Stream directo del archivo de video dentro del torrent
 app.get('/api/stream/:infoHash', async (req, res) => {
   const { infoHash } = req.params;
   if (!infoHash) {
@@ -209,14 +258,12 @@ app.get('/api/stream/:infoHash', async (req, res) => {
   await streamEngine.streamTorrent(infoHash, req, res);
 });
 
-// Estado en tiempo real del torrent (peers, velocidad, porcentaje)
 app.get('/api/stream/:infoHash/status', (req, res) => {
   const { infoHash } = req.params;
   const status = streamEngine.getStatus(infoHash);
   res.json(status);
 });
 
-// Cierre explícito de reproducción para autolimpieza de almacenamiento en disco
 app.post('/api/stream/close', (req, res) => {
   const { infoHash } = req.body;
   if (infoHash) {
@@ -226,16 +273,15 @@ app.post('/api/stream/close', (req, res) => {
 });
 
 // -------------------------------------------------------------
-// MÓDULO EXPANSION: Motor de Subtítulos en Español (Zero-API-Key)
+// MÓDULO EXPANSION: Motor de Subtítulos Multi-Idioma
 // -------------------------------------------------------------
 
-// Obtener lista de subtítulos en español para un título
 app.get('/api/subtitles/:type/:imdbId', async (req, res) => {
   try {
     const { type, imdbId } = req.params;
     const { season, episode } = req.query;
 
-    const subtitles = await subtitleService.getSpanishSubtitles(type, imdbId, season, episode);
+    const subtitles = await subtitleService.getSubtitles(type, imdbId, season, episode);
     res.json({
       imdbId,
       total: subtitles.length,
@@ -247,7 +293,6 @@ app.get('/api/subtitles/:type/:imdbId', async (req, res) => {
   }
 });
 
-// Proxy y Conversor automático de .SRT a WebVTT para etiquetas <track> de HTML5
 app.get('/api/subtitles/vtt', async (req, res) => {
   const { url } = req.query;
   if (!url) {
@@ -275,10 +320,6 @@ app.get('/api/subtitles/vtt', async (req, res) => {
   }
 });
 
-// -------------------------------------------------------------
-// MÓDULO EXPANSION: Lanzador Nativo VLC / MPV (Audio AC3/DTS/Dolby)
-// -------------------------------------------------------------
-
 app.post('/api/player/launch', (req, res) => {
   try {
     const { player = 'vlc', streamUrl, subtitleUrl, title } = req.body;
@@ -299,7 +340,6 @@ app.post('/api/player/launch', (req, res) => {
 // RUTAS MÓDULO C: Televisión en Vivo (Motor IPTV M3U)
 // -------------------------------------------------------------
 
-// Canales por país, categoría, o listas personalizadas agregadas
 app.get('/api/iptv/channels', async (req, res) => {
   try {
     const {
@@ -370,7 +410,6 @@ app.get('/api/iptv/channels', async (req, res) => {
   }
 });
 
-// Endpoint POST para consultar listas M3U y credenciales Xtream Codes dinámicamente
 app.post('/api/iptv/custom', async (req, res) => {
   try {
     const { customUrls = [], xtream = null, forceRefresh = false } = req.body;
@@ -388,7 +427,6 @@ app.post('/api/iptv/custom', async (req, res) => {
   }
 });
 
-// Países y fuentes disponibles
 app.get('/api/iptv/countries', (req, res) => {
   res.json({
     countries: iptvService.COUNTRY_NAMES,
@@ -396,7 +434,6 @@ app.get('/api/iptv/countries', (req, res) => {
   });
 });
 
-// Proxy de stream para canales con bloqueos CORS
 app.get('/api/iptv/proxy', async (req, res) => {
   const { url } = req.query;
   if (!url) {
@@ -405,19 +442,15 @@ app.get('/api/iptv/proxy', async (req, res) => {
   await iptvService.proxyStream(url, req, res);
 });
 
-// -------------------------------------------------------------
-// Health Check
-// -------------------------------------------------------------
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'online',
-    version: '2.2.0',
-    platform: 'StreamFlix Pro: Hybrid Engine + Anime & Platform Hubs ($0 Cost)',
+    version: '4.0.0',
+    platform: 'StreamFlix Pro v4.0 — Masterpiece Edition ($0 Cost)',
     timestamp: new Date().toISOString(),
   });
 });
 
-// Manejo global de excepciones para prevenir cierres por desconexiones prematuras de clientes HTTP
 process.on('uncaughtException', (err) => {
   if (err.code === 'PREMATURE_CLOSE' || err.code === 'ERR_STREAM_PREMATURE_CLOSE') return;
   console.error('[Middleware Uncaught Exception]:', err.message);
@@ -427,10 +460,9 @@ process.on('unhandledRejection', (reason) => {
   console.error('[Middleware Unhandled Rejection]:', reason);
 });
 
-// Iniciar servidor
 app.listen(PORT, () => {
   console.log(`=======================================================`);
-  console.log(`🚀 StreamFlix Middleware activo en: http://localhost:${PORT}`);
-  console.log(`📺 IPTV, Torrentio P2P, Anime, Hubs, OpenSubtitles & VLC/MPV listos`);
+  console.log(`🚀 StreamFlix Pro v4.0 activo en: http://localhost:${PORT}`);
+  console.log(`🎬 Catálogo Clásico (70s-2026), 18 Espejos Cloud & P2P listos`);
   console.log(`=======================================================`);
 });

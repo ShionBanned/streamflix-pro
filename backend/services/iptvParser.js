@@ -4,23 +4,18 @@ import axios from 'axios';
 // 1. Fuentes Oficiales Públicas y Canales FAST 24/7
 // -------------------------------------------------------------
 export const DEFAULT_M3U_SOURCES = [
-  // 1. Todos los canales en idioma Español a nivel mundial (+1,500 canales)
   { name: 'Español Global', url: 'https://iptv-org.github.io/iptv/languages/spa.m3u', country: 'es-global' },
-  // 2. Países clave de habla hispana y deportes
   { name: 'Colombia', url: 'https://iptv-org.github.io/iptv/countries/co.m3u', country: 'co' },
   { name: 'México', url: 'https://iptv-org.github.io/iptv/countries/mx.m3u', country: 'mx' },
   { name: 'Argentina', url: 'https://iptv-org.github.io/iptv/countries/ar.m3u', country: 'ar' },
   { name: 'España', url: 'https://iptv-org.github.io/iptv/countries/es.m3u', country: 'es' },
   { name: 'USA', url: 'https://iptv-org.github.io/iptv/countries/us.m3u', country: 'us' },
-  // 3. Categorías globales clave (Deportes, Cine, Música, Animación)
   { name: 'Deportes', url: 'https://iptv-org.github.io/iptv/categories/sports.m3u', country: 'global' },
   { name: 'Películas', url: 'https://iptv-org.github.io/iptv/categories/movies.m3u', country: 'global' },
   { name: 'Animación', url: 'https://iptv-org.github.io/iptv/categories/animation.m3u', country: 'global' },
-  // 4. Canales FAST 24/7 de Pluto TV (Español / Latam)
   { name: 'Pluto TV', url: 'https://raw.githubusercontent.com/HelmerLuzo/PlutoTV_HL/main/tv/m3u/PlutoTV_tv_es.m3u', country: 'latam' },
 ];
 
-// Países mapeados para filtros rápidos
 export const COUNTRY_NAMES = {
   co: 'Colombia',
   mx: 'México',
@@ -31,20 +26,13 @@ export const COUNTRY_NAMES = {
   'es-global': 'Internacional',
 };
 
-// -------------------------------------------------------------
-// 2. Caché en Memoria con TTL de 30 minutos
-// -------------------------------------------------------------
 let aggregatedCache = null;
 let lastCacheTime = 0;
-const CACHE_TTL = 30 * 60 * 1000; // 30 minutos
+const CACHE_TTL = 30 * 60 * 1000;
 
-/**
- * Normaliza las categorías del tag group-title o metadatos a categorías limpias en español
- */
 export function normalizeCategory(rawGroup = '', channelName = '', channelUrl = '', sourceName = '') {
   const text = `${rawGroup} ${channelName} ${channelUrl} ${sourceName}`.toLowerCase();
 
-  // 1. Canales Pluto TV 24/7
   if (
     text.includes('pluto.tv') ||
     text.includes('jmp2.uk/plu-') ||
@@ -54,7 +42,6 @@ export function normalizeCategory(rawGroup = '', channelName = '', channelUrl = 
     return 'Pluto TV 24/7';
   }
 
-  // 2. Deportes
   if (
     text.includes('sport') ||
     text.includes('deporte') ||
@@ -71,7 +58,6 @@ export function normalizeCategory(rawGroup = '', channelName = '', channelUrl = 
     return 'Deportes';
   }
 
-  // 3. Películas y Series
   if (
     text.includes('movie') ||
     text.includes('cinema') ||
@@ -88,7 +74,6 @@ export function normalizeCategory(rawGroup = '', channelName = '', channelUrl = 
     return 'Películas y Series';
   }
 
-  // 4. Noticias
   if (
     text.includes('news') ||
     text.includes('noticia') ||
@@ -103,7 +88,6 @@ export function normalizeCategory(rawGroup = '', channelName = '', channelUrl = 
     return 'Noticias';
   }
 
-  // 5. Infantil y Anime
   if (
     text.includes('kid') ||
     text.includes('infantil') ||
@@ -120,7 +104,6 @@ export function normalizeCategory(rawGroup = '', channelName = '', channelUrl = 
     return 'Infantil y Anime';
   }
 
-  // 6. Música
   if (
     text.includes('music') ||
     text.includes('música') ||
@@ -132,19 +115,14 @@ export function normalizeCategory(rawGroup = '', channelName = '', channelUrl = 
     return 'Música';
   }
 
-  // 7. Países específicos si vienen de sus listas dedicadas
   if (sourceName === 'Colombia' || text.includes('colombia')) return 'Colombia';
   if (sourceName === 'México' || text.includes('méxico') || text.includes('mexico')) return 'México';
   if (sourceName === 'Argentina' || text.includes('argentina')) return 'Argentina';
   if (sourceName === 'España' || text.includes('españa') || text.includes('spain')) return 'España';
 
-  // 8. Entretenimiento general
   return 'Entretenimiento';
 }
 
-/**
- * Parsea el texto M3U/M3U8 extrayendo metadatos limpios
- */
 export function parseM3UContent(content = '', sourceInfo = {}) {
   const lines = content.split(/\r?\n/);
   const channels = [];
@@ -159,10 +137,16 @@ export function parseM3UContent(content = '', sourceInfo = {}) {
       const groupMatch = line.match(/group-title="([^"]*)"/i);
       const idMatch = line.match(/tvg-id="([^"]*)"/i);
       const countryMatch = line.match(/tvg-country="([^"]*)"/i);
+      const userAgentMatch = line.match(/http-user-agent="([^"]*)"/i);
+      const referrerMatch = line.match(/http-referrer="([^"]*)"/i);
 
       const commaIndex = line.lastIndexOf(',');
       const rawName = commaIndex !== -1 ? line.substring(commaIndex + 1).trim() : 'Canal sin nombre';
       const cleanName = rawName.replace(/\s*\[.*?\]|\s*\(.*?\)/g, '').trim() || rawName;
+
+      // Detectar si el nombre menciona HEVC / H265 o baja compatibilidad
+      const isHevcHint = /hevc|h\.?265/i.test(rawName);
+      const resolutionMatch = rawName.match(/\b(4K|2160p|1080p|720p|576p|480p)\b/i);
 
       const rawCategory = groupMatch ? groupMatch[1].trim() : '';
       const countryCode = (countryMatch ? countryMatch[1].toLowerCase() : sourceInfo.country) || 'global';
@@ -176,12 +160,22 @@ export function parseM3UContent(content = '', sourceInfo = {}) {
         country: countryCode,
         countryName: COUNTRY_NAMES[countryCode] || sourceInfo.name || 'Internacional',
         source: sourceInfo.name || 'M3U',
+        quality: resolutionMatch ? resolutionMatch[1].toUpperCase() : 'HD',
+        isHevcHint,
+        userAgent: userAgentMatch ? userAgentMatch[1] : null,
+        referrer: referrerMatch ? referrerMatch[1] : null,
         url: '',
       };
+    } else if (line.startsWith('#EXTVLCOPT:') && current) {
+      if (line.includes('http-user-agent=')) {
+        current.userAgent = line.split('http-user-agent=')[1]?.trim() || current.userAgent;
+      }
+      if (line.includes('http-referrer=')) {
+        current.referrer = line.split('http-referrer=')[1]?.trim() || current.referrer;
+      }
     } else if (!line.startsWith('#') && current) {
       current.url = line;
 
-      // Normalizar categoría
       current.category = normalizeCategory(
         current.rawCategory,
         current.name,
@@ -189,14 +183,12 @@ export function parseM3UContent(content = '', sourceInfo = {}) {
         sourceInfo.name
       );
 
-      // Logo fallback elegante
       if (!current.logo) {
         current.logo = `https://ui-avatars.com/api/?name=${encodeURIComponent(
           current.name
         )}&background=E50914&color=fff&size=128&bold=true`;
       }
 
-      // Validar que sea un enlace HTTP/HTTPS
       if (current.url.startsWith('http://') || current.url.startsWith('https://')) {
         channels.push(current);
       }
@@ -207,9 +199,6 @@ export function parseM3UContent(content = '', sourceInfo = {}) {
   return channels;
 }
 
-/**
- * Consulta la API estándar de Xtream Codes y la convierte a canales compatibles
- */
 export async function fetchXtreamChannels({ server, username, password }) {
   if (!server || !username || !password) return [];
 
@@ -235,6 +224,7 @@ export async function fetchXtreamChannels({ server, username, password }) {
       country: 'custom',
       countryName: 'IPTV Privado',
       source: 'Xtream Codes',
+      quality: 'HD',
       url: `${cleanServer}/live/${username}/${password}/${s.stream_id}.m3u8`,
     }));
   } catch (err) {
@@ -243,9 +233,6 @@ export async function fetchXtreamChannels({ server, username, password }) {
   }
 }
 
-/**
- * Agregador Multi-Fuente: Descarga en paralelo y fusiona todas las fuentes M3U
- */
 export async function getAggregatedChannels(options = {}) {
   const {
     forceRefresh = false,
@@ -255,32 +242,29 @@ export async function getAggregatedChannels(options = {}) {
 
   const now = Date.now();
 
-  // 1. Verificar si el catálogo base en memoria sigue fresco
   let baseChannels = [];
   if (!forceRefresh && aggregatedCache && now - lastCacheTime < CACHE_TTL) {
     baseChannels = aggregatedCache;
   } else {
     console.log('[IPTV Aggregator] Descargando y fusionando fuentes M3U en paralelo...');
 
-    // Descarga en paralelo con axios y Promise.allSettled
     const fetchPromises = DEFAULT_M3U_SOURCES.map(async (src) => {
       try {
         const res = await axios.get(src.url, {
           timeout: 9000,
           headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
           },
         });
         return parseM3UContent(res.data, src);
       } catch (err) {
-        console.warn(`[IPTV Aggregator] Fuente omitida o no disponible (${src.name}):`, err.message);
+        console.warn(`[IPTV Aggregator] Fuente omitida (${src.name}):`, err.message);
         return [];
       }
     });
 
     const results = await Promise.allSettled(fetchPromises);
 
-    // Fusión y deduplicación por URL de streaming
     const seenUrls = new Set();
     const merged = [];
 
@@ -296,16 +280,17 @@ export async function getAggregatedChannels(options = {}) {
       }
     }
 
+    // Priorizar canales no-HEVC primero para evitar pantallas negras por defecto
+    merged.sort((a, b) => Number(Boolean(a.isHevcHint)) - Number(Boolean(b.isHevcHint)));
+
     aggregatedCache = merged;
     lastCacheTime = now;
     baseChannels = merged;
-    console.log(`[IPTV Aggregator] Fusión completada: ${baseChannels.length} canales únicos listos en memoria.`);
+    console.log(`[IPTV Aggregator] Fusión completada: ${baseChannels.length} canales únicos listos.`);
   }
 
-  // 2. Procesar listas personalizadas del usuario si existen
   let customChannels = [];
 
-  // M3U externos adicionales
   if (Array.isArray(customUrls) && customUrls.length > 0) {
     const customPromises = customUrls.filter(Boolean).map(async (url) => {
       try {
@@ -330,13 +315,11 @@ export async function getAggregatedChannels(options = {}) {
     }
   }
 
-  // Canales Xtream Codes
   if (xtream?.server && xtream?.username && xtream?.password) {
     const xtreamList = await fetchXtreamChannels(xtream);
     customChannels.push(...xtreamList);
   }
 
-  // Si hay canales personalizados, colocarlos arriba con prioridad
   let finalChannels = baseChannels;
   if (customChannels.length > 0) {
     const seen = new Set(customChannels.map((c) => c.url.toLowerCase().trim()));
@@ -348,69 +331,107 @@ export async function getAggregatedChannels(options = {}) {
 }
 
 /**
- * Proxy de streaming para evitar bloqueos CORS y cabeceras estrictas en navegadores
+ * Proxy Inteligente de Streaming HLS/M3U8 y Segmentos TS/fMP4
+ * Soluciona el bug de "Audio se reproduce pero pantalla negra" causado por:
+ * 1. Sub-playlists de video sin extensión .m3u8 explícita que antes no se reescribían.
+ * 2. Segmentos de inicialización #EXT-X-MAP:URI="..." y pistas separadas de video/audio.
+ * 3. Cabeceras Origin/Referer requeridas por CDNs de Pluto TV, Akamai y Cloudfront.
  */
 export async function proxyStream(streamUrl, req, res) {
   try {
-    const isM3U8 = streamUrl.includes('.m3u8') || streamUrl.includes('m3u');
+    const parsedTarget = new URL(streamUrl);
+    const originHeader = `${parsedTarget.protocol}//${parsedTarget.host}`;
+
+    // Detectar si es claramente un segmento binario (.ts, .m4s, .aac, .mp4, .cmfv, .cmfa, .key)
+    const pathnameLower = parsedTarget.pathname.toLowerCase();
+    const isBinarySegment = /\.(ts|m4s|mp4|aac|cmfv|cmfa|mp3|key|vtt)$/i.test(pathnameLower);
 
     const response = await axios({
       method: 'get',
       url: streamUrl,
-      responseType: isM3U8 ? 'text' : 'stream',
-      timeout: 12000,
+      responseType: isBinarySegment ? 'stream' : 'arraybuffer',
+      timeout: 14000,
+      maxRedirects: 5,
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        Referer: streamUrl,
+        'User-Agent':
+          req.query.ua ||
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        Referer: req.query.ref || `${originHeader}/`,
+        Origin: originHeader,
+        Accept: '*/*',
       },
     });
 
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', '*');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
 
-    const contentType = response.headers['content-type'] || '';
+    const contentType = (response.headers['content-type'] || '').toLowerCase();
 
-    // Si es un playlist M3U8, reescribir URIs relativas y absolutas para que pasen por el proxy
-    if (typeof response.data === 'string' && (response.data.includes('#EXTM3U') || contentType.includes('mpegurl') || isM3U8)) {
+    // Si se descargó como stream binario directo, hacer pipe inmediato
+    if (isBinarySegment) {
+      if (contentType) res.setHeader('Content-Type', contentType);
+      else if (pathnameLower.endsWith('.ts')) res.setHeader('Content-Type', 'video/mp2t');
+      else if (pathnameLower.endsWith('.m4s') || pathnameLower.endsWith('.mp4')) res.setHeader('Content-Type', 'video/iso.segment');
+
+      req.on('close', () => {
+        if (response.data && typeof response.data.destroy === 'function') {
+          response.data.destroy();
+        }
+      });
+      return response.data.pipe(res);
+    }
+
+    // Convertir el buffer a texto para verificar si es un manifiesto #EXTM3U (incluso si la URL no terminaba en .m3u8)
+    const buffer = Buffer.from(response.data);
+    const firstBytes = buffer.subarray(0, 64).toString('utf8').trimStart();
+    const isManifest =
+      firstBytes.startsWith('#EXTM3U') ||
+      contentType.includes('mpegurl') ||
+      pathnameLower.endsWith('.m3u8') ||
+      pathnameLower.endsWith('.m3u');
+
+    if (isManifest) {
+      const manifestText = buffer.toString('utf8');
       const finalUrl = response.request?.res?.responseUrl || streamUrl;
-      const baseUrl = finalUrl.substring(0, finalUrl.lastIndexOf('/') + 1);
+      const baseUrlObj = new URL(finalUrl);
 
       res.setHeader('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');
 
-      // Reescribir líneas de segmentos y atributos URI="..."
-      let rewritten = response.data;
+      // Función auxiliar para resolver cualquier URI relativa o absoluta preservando tokens de sesión
+      const toProxiedUrl = (rawUri) => {
+        try {
+          const resolved = new URL(rawUri.trim(), baseUrlObj).href;
+          return `/api/iptv/proxy?url=${encodeURIComponent(resolved)}`;
+        } catch {
+          return rawUri;
+        }
+      };
 
-      // 1. Reescribir URI="..." en #EXT-X-MEDIA y llaves
-      rewritten = rewritten.replace(/URI="([^"]+)"/g, (match, uri) => {
-        const absoluteUri = uri.startsWith('http') ? uri : new URL(uri, baseUrl).href;
-        return `URI="/api/iptv/proxy?url=${encodeURIComponent(absoluteUri)}"`;
+      // 1. Reescribir cualquier atributo URI="..." (en #EXT-X-MEDIA, #EXT-X-KEY, #EXT-X-MAP, #EXT-X-I-FRAME-STREAM-INF)
+      let rewritten = manifestText.replace(/URI="([^"]+)"/gi, (_, uri) => {
+        return `URI="${toProxiedUrl(uri)}"`;
       });
 
-      // 2. Reescribir líneas de segmentos y sub-playlists
+      // 2. Reescribir líneas de variantes y segmentos
       const lines = rewritten.split(/\r?\n/);
       const modifiedLines = lines.map((line) => {
         const trimmed = line.trim();
         if (!trimmed || trimmed.startsWith('#')) return line;
-        const absoluteUri = trimmed.startsWith('http') ? trimmed : new URL(trimmed, baseUrl).href;
-        return `/api/iptv/proxy?url=${encodeURIComponent(absoluteUri)}`;
+        return toProxiedUrl(trimmed);
       });
 
       return res.send(modifiedLines.join('\n'));
     }
 
-    // Para segmentos binarios (.ts, .aac, .m4s, etc.)
+    // Si no era manifiesto sino un segmento binario sin extensión estándar
     if (contentType) {
       res.setHeader('Content-Type', contentType);
+    } else {
+      res.setHeader('Content-Type', 'video/mp2t');
     }
-
-    req.on('close', () => {
-      if (response.data && typeof response.data.destroy === 'function') {
-        response.data.destroy();
-      }
-    });
-
-    response.data.pipe(res);
+    return res.send(buffer);
   } catch (err) {
     console.error(`[IPTV Proxy Error]:`, err.message);
     if (!res.headersSent) {

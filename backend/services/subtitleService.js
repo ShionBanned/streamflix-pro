@@ -2,8 +2,9 @@ import axios from 'axios';
 
 /**
  * Consulta el endpoint público de subtítulos v3 compatible con Stremio (Zero-API-Key)
+ * Soporta Español Latino, Español Castellano e Inglés CC
  */
-export async function getSpanishSubtitles(type, imdbId, season = null, episode = null) {
+export async function getSubtitles(type, imdbId, season = null, episode = null) {
   try {
     if (!imdbId) return [];
 
@@ -22,35 +23,58 @@ export async function getSpanishSubtitles(type, imdbId, season = null, episode =
       return [];
     }
 
-    // Filtrar solo subtítulos en español / latino
-    const spanishSubs = data.subtitles
-      .filter((sub) => {
-        const lang = (sub.lang || '').toLowerCase();
-        return ['spa', 'es', 'spl', 'esp', 'spanish'].includes(lang);
-      })
-      .slice(0, 10) // Tomar los 10 mejores resultados
-      .map((sub, index) => {
-        const isLatino = (sub.lang || '').toLowerCase() === 'spl';
-        const labelText = isLatino
-          ? `Español Latino (Opción ${index + 1})`
-          : `Español (Opción ${index + 1})`;
+    const latinoList = [];
+    const spanishList = [];
+    const englishList = [];
 
-        return {
-          id: sub.id || `spa-${index + 1}`,
-          lang: 'es',
-          label: labelText,
-          originalUrl: sub.url,
-          // URL proxificada y convertida a WebVTT para el reproductor HTML5
-          vttUrl: `http://localhost:4000/api/subtitles/vtt?url=${encodeURIComponent(sub.url)}`,
-        };
-      });
+    for (const sub of data.subtitles) {
+      const lang = (sub.lang || '').toLowerCase();
+      if (!sub.url) continue;
 
-    return spanishSubs;
+      if (lang === 'spl' || lang === 'es-mx' || lang === 'es-la') {
+        if (latinoList.length < 6) {
+          latinoList.push({
+            id: sub.id || `lat-${latinoList.length + 1}`,
+            lang: 'es-MX',
+            langGroup: 'latino',
+            label: `🇲🇽 Español Latino #${latinoList.length + 1}`,
+            originalUrl: sub.url,
+            vttUrl: `/api/subtitles/vtt?url=${encodeURIComponent(sub.url)}`,
+          });
+        }
+      } else if (['spa', 'es', 'esp', 'spanish'].includes(lang)) {
+        if (spanishList.length < 8) {
+          spanishList.push({
+            id: sub.id || `spa-${spanishList.length + 1}`,
+            lang: 'es',
+            langGroup: 'castellano',
+            label: `🇪🇸 Español #${spanishList.length + 1}`,
+            originalUrl: sub.url,
+            vttUrl: `/api/subtitles/vtt?url=${encodeURIComponent(sub.url)}`,
+          });
+        }
+      } else if (['eng', 'en', 'english'].includes(lang)) {
+        if (englishList.length < 4) {
+          englishList.push({
+            id: sub.id || `eng-${englishList.length + 1}`,
+            lang: 'en',
+            langGroup: 'en',
+            label: `🇺🇸 English CC #${englishList.length + 1}`,
+            originalUrl: sub.url,
+            vttUrl: `/api/subtitles/vtt?url=${encodeURIComponent(sub.url)}`,
+          });
+        }
+      }
+    }
+
+    return [...latinoList, ...spanishList, ...englishList];
   } catch (error) {
     console.error('[SubtitleService Error]:', error.message);
     return [];
   }
 }
+
+export const getSpanishSubtitles = getSubtitles;
 
 /**
  * Convierte un texto SRT tradicional a formato WebVTT estándar
@@ -58,21 +82,18 @@ export async function getSpanishSubtitles(type, imdbId, season = null, episode =
 export function convertSrtToVtt(srtContent = '') {
   if (!srtContent) return 'WEBVTT\n\n';
 
-  // Si ya es WebVTT, devolver limpio
   if (srtContent.trim().startsWith('WEBVTT')) {
     return srtContent;
   }
 
-  // Normalizar saltos de línea
   const cleanSrt = srtContent.replace(/\r\n|\r/g, '\n');
-
-  // Reemplazar comas de milisegundos (00:01:23,456) por puntos (00:01:23.456)
   const vttBody = cleanSrt.replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2');
 
   return `WEBVTT\n\n${vttBody}`;
 }
 
 export default {
+  getSubtitles,
   getSpanishSubtitles,
   convertSrtToVtt,
 };
