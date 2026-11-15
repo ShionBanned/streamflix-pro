@@ -76,6 +76,62 @@
   }
 }
 
+@keyframes heroContentSlide {
+  0% {
+    opacity: 0;
+    transform: translate3d(-24px, 14px, 0);
+    filter: blur(6px);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+    filter: blur(0);
+  }
+}
+
+@keyframes heroKenBurns {
+  0% {
+    opacity: 0.25;
+    transform: scale(1.08);
+  }
+  15% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1.01);
+  }
+}
+
+@keyframes slideProgressFill {
+  0% {
+    width: 0%;
+  }
+  100% {
+    width: 100%;
+  }
+}
+
+@keyframes carouselRowSlide {
+  0% {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes eqBarPulse {
+  0%, 100% {
+    transform: scaleY(0.35);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
 @keyframes shimmerSweep {
   0% {
     background-position: -200% 0;
@@ -102,6 +158,32 @@
   animation: modalSlideUp 0.36s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
+.animate-heroContent {
+  animation: heroContentSlide 0.55s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-heroBackdrop {
+  animation: heroKenBurns 9s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.animate-slideProgress {
+  animation: slideProgressFill 9s linear forwards;
+}
+
+.animate-rowReveal {
+  animation: carouselRowSlide 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-eq-1 {
+  animation: eqBarPulse 0.8s ease-in-out infinite;
+}
+.animate-eq-2 {
+  animation: eqBarPulse 0.6s ease-in-out 0.2s infinite;
+}
+.animate-eq-3 {
+  animation: eqBarPulse 0.9s ease-in-out 0.35s infinite;
+}
+
 .netflix-shimmer {
   background: linear-gradient(
     90deg,
@@ -114,23 +196,24 @@
 }
 
 .netflix-card-transition {
-  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1),
-              box-shadow 0.35s cubic-bezier(0.16, 1, 0.3, 1),
-              border-color 0.25s ease;
+  transition: transform 0.38s cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 0.38s cubic-bezier(0.16, 1, 0.3, 1),
+              border-color 0.25s ease,
+              filter 0.25s ease;
 }
 
 .netflix-card-transition:hover {
-  transform: translateY(-6px) scale(1.045);
-  box-shadow: 0 20px 38px -10px rgba(0, 0, 0, 0.85), 0 0 18px 0 rgba(229, 9, 20, 0.16);
+  transform: translateY(-7px) scale(1.05);
+  box-shadow: 0 22px 42px -10px rgba(0, 0, 0, 0.9), 0 0 20px 0 rgba(229, 9, 20, 0.22);
 }
 
 /* Custom styling for HTML5 video subtitles */
 video::cue {
-  background-color: rgba(0, 0, 0, 0.78);
+  background-color: transparent;
   color: #ffffff;
-  font-family: 'Inter', sans-serif;
-  font-weight: 700;
-  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.95);
-  border-radius: 4px;
-  padding: 2px 8px;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 1.45rem;
+  font-weight: 600;
+  line-height: 1.25;
+  text-shadow: -2px -2px 2px #000, 2px -2px 2px #000, -2px 2px 2px #000, 2px 2px 2px #000, 0 3px 8px #000;
 }

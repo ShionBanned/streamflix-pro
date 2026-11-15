@@ -1,4 +1,30 @@
 import axios from 'axios';
+import { randomUUID } from 'node:crypto';
+import { toWebVtt } from '../../shared/subtitleUtils.mjs';
+
+const downloads = new Map();
+function validateSubtitleUrl(value) {
+  const url = new URL(value);
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.port && !['80', '443'].includes(url.port) || /^(localhost|.*\.localhost|.*\.local|\d+(?:\.\d+){3}|\[.*\])$/i.test(url.hostname)) throw new Error('Origen de subtítulos no permitido');
+  return url.href;
+}
+function registerSubtitle(value) {
+  const url = validateSubtitleUrl(value); const id = randomUUID();
+  for (const [key, entry] of downloads) if (entry.expiresAt <= Date.now()) downloads.delete(key);
+  if (downloads.size >= 1000) downloads.delete(downloads.keys().next().value);
+  downloads.set(id, { url, expiresAt: Date.now() + 30 * 60 * 1000 });
+  return `/api/subtitles/vtt?id=${id}`;
+}
+
+export async function fetchSubtitle(id) {
+  const entry = downloads.get(id);
+  if (!entry || entry.expiresAt <= Date.now()) throw Object.assign(new Error('El enlace de subtítulos venció. Vuelve a buscar la pista.'), { status: 410 });
+  const response = await axios.get(entry.url, {
+    responseType: 'text', timeout: 9000, maxContentLength: 2 * 1024 * 1024, maxBodyLength: 2 * 1024 * 1024, maxRedirects: 3,
+    beforeRedirect: options => validateSubtitleUrl(`${options.protocol}//${options.hostname}${options.port ? ':' + options.port : ''}${options.path}`),
+  });
+  return toWebVtt(response.data);
+}
 
 /**
  * Consulta el endpoint público de subtítulos v3 compatible con Stremio (Zero-API-Key)
@@ -6,10 +32,11 @@ import axios from 'axios';
  */
 export async function getSubtitles(type, imdbId, season = null, episode = null) {
   try {
-    if (!imdbId) return [];
+    if (!/^tt\d+$/.test(String(imdbId))) return [];
 
     const isSeries = type === 'series' || type === 'tv' || Boolean(season && episode);
-    const queryId = isSeries ? `${imdbId}:${season || 1}:${episode || 1}` : imdbId;
+    if (isSeries && (!Number.isInteger(Number(season || 1)) || Number(season || 1) < 1 || !Number.isInteger(Number(episode || 1)) || Number(episode || 1) < 1)) return [];
+    const queryId = isSeries ? `${imdbId}:${Number(season || 1)}:${Number(episode || 1)}` : imdbId;
     const url = `https://opensubtitles-v3.strem.io/subtitles/${isSeries ? 'series' : 'movie'}/${queryId}.json`;
 
     const { data } = await axios.get(url, {
@@ -30,38 +57,39 @@ export async function getSubtitles(type, imdbId, season = null, episode = null) 
     for (const sub of data.subtitles) {
       const lang = (sub.lang || '').toLowerCase();
       if (!sub.url) continue;
+      try { validateSubtitleUrl(sub.url); } catch { continue; }
 
       if (lang === 'spl' || lang === 'es-mx' || lang === 'es-la') {
         if (latinoList.length < 6) {
           latinoList.push({
-            id: sub.id || `lat-${latinoList.length + 1}`,
+            id: `lat-${sub.id || latinoList.length + 1}`,
             lang: 'es-MX',
             langGroup: 'latino',
             label: `🇲🇽 Español Latino #${latinoList.length + 1}`,
-            originalUrl: sub.url,
-            vttUrl: `/api/subtitles/vtt?url=${encodeURIComponent(sub.url)}`,
+            release: String(sub.release || sub.name || sub.title || '').slice(0, 120), matching: 'unverified',
+            vttUrl: registerSubtitle(sub.url),
           });
         }
       } else if (['spa', 'es', 'esp', 'spanish'].includes(lang)) {
         if (spanishList.length < 8) {
           spanishList.push({
-            id: sub.id || `spa-${spanishList.length + 1}`,
+            id: `spa-${sub.id || spanishList.length + 1}`,
             lang: 'es',
             langGroup: 'castellano',
             label: `🇪🇸 Español #${spanishList.length + 1}`,
-            originalUrl: sub.url,
-            vttUrl: `/api/subtitles/vtt?url=${encodeURIComponent(sub.url)}`,
+            release: String(sub.release || sub.name || sub.title || '').slice(0, 120), matching: 'unverified',
+            vttUrl: registerSubtitle(sub.url),
           });
         }
       } else if (['eng', 'en', 'english'].includes(lang)) {
         if (englishList.length < 4) {
           englishList.push({
-            id: sub.id || `eng-${englishList.length + 1}`,
+            id: `eng-${sub.id || englishList.length + 1}`,
             lang: 'en',
             langGroup: 'en',
             label: `🇺🇸 English CC #${englishList.length + 1}`,
-            originalUrl: sub.url,
-            vttUrl: `/api/subtitles/vtt?url=${encodeURIComponent(sub.url)}`,
+            release: String(sub.release || sub.name || sub.title || '').slice(0, 120), matching: 'unverified',
+            vttUrl: registerSubtitle(sub.url),
           });
         }
       }
@@ -80,20 +108,12 @@ export const getSpanishSubtitles = getSubtitles;
  * Convierte un texto SRT tradicional a formato WebVTT estándar
  */
 export function convertSrtToVtt(srtContent = '') {
-  if (!srtContent) return 'WEBVTT\n\n';
-
-  if (srtContent.trim().startsWith('WEBVTT')) {
-    return srtContent;
-  }
-
-  const cleanSrt = srtContent.replace(/\r\n|\r/g, '\n');
-  const vttBody = cleanSrt.replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2');
-
-  return `WEBVTT\n\n${vttBody}`;
+  return toWebVtt(srtContent);
 }
 
 export default {
   getSubtitles,
   getSpanishSubtitles,
   convertSrtToVtt,
+  fetchSubtitle,
 };

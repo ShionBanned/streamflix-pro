@@ -6,7 +6,6 @@ dotenv.config();
 const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 const DEFAULT_KEY = '520a42415ce10d3f6e1d41d4010771f5';
 
-// Optimización de velocidad de carga: w342 para pósters de grilla (carga 6x más rápido) y w1280 para backdrops HD (carga 25x más rápido que /original)
 const POSTER_BASE = 'https://image.tmdb.org/t/p/w342';
 const POSTER_HD_BASE = 'https://image.tmdb.org/t/p/w500';
 const BACKDROP_BASE = 'https://image.tmdb.org/t/p/w1280';
@@ -14,7 +13,6 @@ const BACKDROP_BASE = 'https://image.tmdb.org/t/p/w1280';
 const getApiKey = () => process.env.TMDB_API_KEY || DEFAULT_KEY;
 const getReadToken = () => process.env.TMDB_READ_TOKEN || null;
 
-// Agente Keep-Alive para reutilizar conexiones TLS con TMDB y reducir latencia en un 70%
 const httpsAgent = new https.Agent({
   keepAlive: true,
   maxSockets: 64,
@@ -23,11 +21,10 @@ const httpsAgent = new https.Agent({
 
 const tmdbClient = axios.create({
   baseURL: TMDB_BASE_URL,
-  timeout: 9000,
+  timeout: 11000,
   httpsAgent,
 });
 
-// Caché ultrarrápido en memoria con Stale-While-Revalidate (TTL 20 minutos)
 const responseCache = new Map();
 const CACHE_TTL = 20 * 60 * 1000;
 
@@ -69,6 +66,41 @@ const enrichResults = (data) => {
     enriched.recommendations.results = enriched.recommendations.results.map(enrichItem);
   }
   return enriched;
+};
+
+/**
+ * Mezcla pasivamente joyas de culto (vote_count.desc) dentro de las listas actuales
+ * sin crear secciones de "viejos" aisladas, logrando el balance natural de Netflix.
+ */
+const blendPassiveClassics = (modernList = [], classicList = [], mediaType = 'movie') => {
+  const seen = new Set();
+  const result = [];
+  const maxLen = Math.max(modernList.length, classicList.length);
+
+  for (let i = 0; i < maxLen; i++) {
+    if (modernList[i] && modernList[i].id && !seen.has(modernList[i].id)) {
+      seen.add(modernList[i].id);
+      result.push({ ...modernList[i], media_type: modernList[i].media_type || mediaType });
+    }
+    // Insertar 1 clásico icónico por cada 4 títulos actuales del mismo género
+    if (i % 4 === 2 && classicList[Math.floor(i / 4)]) {
+      const cl = classicList[Math.floor(i / 4)];
+      if (cl && cl.id && !seen.has(cl.id)) {
+        seen.add(cl.id);
+        result.push({ ...cl, media_type: cl.media_type || mediaType });
+      }
+    }
+  }
+
+  for (const cl of classicList) {
+    if (result.length >= 24) break;
+    if (cl && cl.id && !seen.has(cl.id)) {
+      seen.add(cl.id);
+      result.push({ ...cl, media_type: cl.media_type || mediaType });
+    }
+  }
+
+  return result;
 };
 
 const tmdbGet = async (endpoint, params = {}) => {
@@ -155,6 +187,7 @@ export const tmdbService = {
     genre = null,
     decade = null,
     network = null,
+    originalLanguage = null,
     sortBy = 'popularity.desc',
     page = 1,
     language = 'es-MX',
@@ -167,15 +200,25 @@ export const tmdbService = {
       sort_by: sortBy,
       page,
       language,
-      'vote_count.gte': decade === '1970s' || decade === '1980s' ? 20 : 35,
+      'vote_count.gte': originalLanguage ? 8 : 15,
     };
 
     if (genre && genre !== 'all') {
-      params.with_genres = genre;
+      // Si no es anime (donde 16 debe combinarse con subgénero), convertir comas múltiples en OR (|) para garantizar amplios resultados
+      const gStr = String(genre).trim();
+      if (originalLanguage === 'ja' && gStr.startsWith('16,')) {
+        params.with_genres = gStr;
+      } else {
+        params.with_genres = gStr.replace(/,/g, '|');
+      }
     }
 
     if (network && network !== 'all' && isTv) {
       params.with_networks = network;
+    }
+
+    if (originalLanguage) {
+      params.with_original_language = originalLanguage;
     }
 
     const dateFieldGte = isTv ? 'first_air_date.gte' : 'primary_release_date.gte';
@@ -197,65 +240,169 @@ export const tmdbService = {
       params[dateFieldGte] = '1980-01-01';
       params[dateFieldLte] = '1989-12-31';
     } else if (decade === 'classic') {
-      params[dateFieldLte] = '1999-12-31';
+      params[dateFieldLte] = '2002-12-31';
       params.sort_by = 'vote_count.desc';
-    } else if (decade === '1970s') {
-      params[dateFieldLte] = '1979-12-31';
     } else {
       params[dateFieldLte] = todayStr;
     }
 
     const data = await tmdbGet(endpoint, params);
-    if (Array.isArray(data?.results)) {
-      return {
-        ...data,
-        results: data.results.map((i) => ({
+    let results = Array.isArray(data?.results)
+      ? data.results.map((i) => ({
           ...i,
           media_type: isTv ? 'tv' : 'movie',
-        })),
-      };
+        }))
+      : [];
+
+    // Integración pasiva: mezclar algunos títulos históricos mejor valorados del mismo género
+    if (results.length > 0 && (!decade || decade === 'all') && sortBy === 'popularity.desc') {
+      try {
+        const iconicParams = {
+          ...params,
+          sort_by: 'vote_count.desc',
+          page: 1,
+        };
+        const iconicData = await tmdbGet(endpoint, iconicParams);
+        const iconicResults = (iconicData?.results || []).map((i) => ({
+          ...i,
+          media_type: isTv ? 'tv' : 'movie',
+        }));
+        results = blendPassiveClassics(results, iconicResults, isTv ? 'tv' : 'movie');
+      } catch {
+        // Conservar lista principal
+      }
     }
-    return data;
+
+    return {
+      ...data,
+      results,
+    };
   },
 
   async getMovieSections(language = 'es-MX') {
-    const [action, scifi, horror, classics90s, comedy, animation] = await Promise.allSettled([
-      this.discoverCatalog({ type: 'movie', genre: '28,12', language }),
+    const [
+      blockbusters,
+      action,
+      scifi,
+      thrillerMystery,
+      horror,
+      comedy,
+      romanceDrama,
+      animation,
+    ] = await Promise.allSettled([
+      this.getNowPlaying(1, language),
+      this.discoverCatalog({ type: 'movie', genre: '28|12', language }),
       this.discoverCatalog({ type: 'movie', genre: '878', language }),
-      this.discoverCatalog({ type: 'movie', genre: '27,53', language }),
-      this.discoverCatalog({ type: 'movie', decade: '1990s', sortBy: 'vote_count.desc', language }),
+      this.discoverCatalog({ type: 'movie', genre: '53|80|9648', language }),
+      this.discoverCatalog({ type: 'movie', genre: '27', language }),
       this.discoverCatalog({ type: 'movie', genre: '35', language }),
-      this.discoverCatalog({ type: 'movie', genre: '16', language }),
+      this.discoverCatalog({ type: 'movie', genre: '18|10749', language }),
+      this.discoverCatalog({ type: 'movie', genre: '16|10751', language }),
     ]);
 
     return {
+      blockbusters: blockbusters.status === 'fulfilled' ? blockbusters.value?.results || [] : [],
       action: action.status === 'fulfilled' ? action.value?.results || [] : [],
       scifi: scifi.status === 'fulfilled' ? scifi.value?.results || [] : [],
+      thrillerMystery:
+        thrillerMystery.status === 'fulfilled' ? thrillerMystery.value?.results || [] : [],
       horror: horror.status === 'fulfilled' ? horror.value?.results || [] : [],
-      classics90s: classics90s.status === 'fulfilled' ? classics90s.value?.results || [] : [],
       comedy: comedy.status === 'fulfilled' ? comedy.value?.results || [] : [],
+      romanceDrama: romanceDrama.status === 'fulfilled' ? romanceDrama.value?.results || [] : [],
       animation: animation.status === 'fulfilled' ? animation.value?.results || [] : [],
     };
   },
 
   async getSeriesSections(language = 'es-MX') {
-    const [topRated, classics90s, retro80s, crimeMystery, scifiFantasy, cartoons] =
-      await Promise.allSettled([
-        this.getTopRatedSeries(1, language),
-        this.discoverCatalog({ type: 'tv', decade: '1990s', sortBy: 'vote_count.desc', language }),
-        this.discoverCatalog({ type: 'tv', decade: '1980s', sortBy: 'vote_count.desc', language }),
-        this.discoverCatalog({ type: 'tv', genre: '80,9648', language }),
-        this.discoverCatalog({ type: 'tv', genre: '10765', language }),
-        this.discoverCatalog({ type: 'tv', genre: '16', sortBy: 'vote_count.desc', language }),
-      ]);
+    const [
+      topRated,
+      actionAdventure,
+      scifiFantasy,
+      crimeMystery,
+      kdramas,
+      sitcoms,
+      cartoons,
+    ] = await Promise.allSettled([
+      this.getTopRatedSeries(1, language),
+      this.discoverCatalog({ type: 'tv', genre: '10759', language }),
+      this.discoverCatalog({ type: 'tv', genre: '10765', language }),
+      this.discoverCatalog({ type: 'tv', genre: '80|9648', language }),
+      this.discoverCatalog({
+        type: 'tv',
+        originalLanguage: 'ko',
+        sortBy: 'popularity.desc',
+        language,
+      }),
+      this.discoverCatalog({ type: 'tv', genre: '35', language }),
+      this.discoverCatalog({ type: 'tv', genre: '16', language }),
+    ]);
 
     return {
       topRated: topRated.status === 'fulfilled' ? topRated.value?.results || [] : [],
-      classics90s: classics90s.status === 'fulfilled' ? classics90s.value?.results || [] : [],
-      retro80s: retro80s.status === 'fulfilled' ? retro80s.value?.results || [] : [],
-      crimeMystery: crimeMystery.status === 'fulfilled' ? crimeMystery.value?.results || [] : [],
+      actionAdventure:
+        actionAdventure.status === 'fulfilled' ? actionAdventure.value?.results || [] : [],
       scifiFantasy: scifiFantasy.status === 'fulfilled' ? scifiFantasy.value?.results || [] : [],
+      crimeMystery: crimeMystery.status === 'fulfilled' ? crimeMystery.value?.results || [] : [],
+      kdramas: kdramas.status === 'fulfilled' ? kdramas.value?.results || [] : [],
+      sitcoms: sitcoms.status === 'fulfilled' ? sitcoms.value?.results || [] : [],
       cartoons: cartoons.status === 'fulfilled' ? cartoons.value?.results || [] : [],
+    };
+  },
+
+  async getAnimeSections(language = 'es-MX') {
+    const [
+      trending,
+      shonenAction,
+      fantasyIsekai,
+      seinenMystery,
+      romanceSlice,
+      animeMovies,
+    ] = await Promise.allSettled([
+      this.getAnime(1, language),
+      this.discoverCatalog({
+        type: 'tv',
+        genre: '16,10759',
+        originalLanguage: 'ja',
+        sortBy: 'popularity.desc',
+        language,
+      }),
+      this.discoverCatalog({
+        type: 'tv',
+        genre: '16,10765',
+        originalLanguage: 'ja',
+        sortBy: 'popularity.desc',
+        language,
+      }),
+      this.discoverCatalog({
+        type: 'tv',
+        genre: '16,9648|80|18',
+        originalLanguage: 'ja',
+        sortBy: 'vote_count.desc',
+        language,
+      }),
+      this.discoverCatalog({
+        type: 'tv',
+        genre: '16,35|10749',
+        originalLanguage: 'ja',
+        sortBy: 'popularity.desc',
+        language,
+      }),
+      this.discoverCatalog({
+        type: 'movie',
+        genre: '16',
+        originalLanguage: 'ja',
+        sortBy: 'popularity.desc',
+        language,
+      }),
+    ]);
+
+    return {
+      trending: trending.status === 'fulfilled' ? trending.value?.results || [] : [],
+      shonenAction: shonenAction.status === 'fulfilled' ? shonenAction.value?.results || [] : [],
+      fantasyIsekai: fantasyIsekai.status === 'fulfilled' ? fantasyIsekai.value?.results || [] : [],
+      seinenMystery: seinenMystery.status === 'fulfilled' ? seinenMystery.value?.results || [] : [],
+      romanceSlice: romanceSlice.status === 'fulfilled' ? romanceSlice.value?.results || [] : [],
+      animeMovies: animeMovies.status === 'fulfilled' ? animeMovies.value?.results || [] : [],
     };
   },
 
@@ -294,7 +441,7 @@ export const tmdbService = {
 
   async getAnime(page = 1, language = 'es-MX') {
     try {
-      const [tvRes, movieRes] = await Promise.all([
+      const [tvRes, movieRes, iconicTvRes] = await Promise.all([
         tmdbGet('/discover/tv', {
           with_genres: 16,
           with_original_language: 'ja',
@@ -309,12 +456,22 @@ export const tmdbService = {
           page,
           language,
         }),
+        tmdbGet('/discover/tv', {
+          with_genres: 16,
+          with_original_language: 'ja',
+          sort_by: 'vote_count.desc',
+          page,
+          language,
+        }),
       ]);
 
       const tvList = (tvRes.results || []).map((i) => ({ ...i, media_type: 'tv' }));
       const movieList = (movieRes.results || []).map((i) => ({ ...i, media_type: 'movie' }));
-      const combined = [...tvList, ...movieList].sort(
-        (a, b) => (b.popularity || 0) - (a.popularity || 0)
+      const iconicList = (iconicTvRes.results || []).map((i) => ({ ...i, media_type: 'tv' }));
+      const combined = blendPassiveClassics(
+        [...tvList, ...movieList].sort((a, b) => (b.popularity || 0) - (a.popularity || 0)),
+        iconicList,
+        'tv'
       );
 
       return {
@@ -424,9 +581,6 @@ export const tmdbService = {
     }
   },
 
-  /**
-   * Precalentamiento en segundo plano al iniciar el servidor para respuestas en <2ms
-   */
   warmUpCache() {
     Promise.allSettled([
       this.getTrending('all', 'week', 1, 'es-MX'),
@@ -436,12 +590,11 @@ export const tmdbService = {
       this.getTopRated(1, 'es-MX'),
       this.getAnime(1, 'es-MX'),
     ]).then(() => {
-      console.log('⚡ [TMDB Cache] Catálogos principales pre-cargados en RAM (<2ms response).');
+      console.log('⚡ [TMDB Cache] Catálogos principales pre-cargados en RAM.');
     });
   },
 };
 
-// Iniciar pre-calentamiento no bloqueante
 setTimeout(() => tmdbService.warmUpCache(), 100);
 
 export default tmdbService;

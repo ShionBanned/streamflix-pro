@@ -95,3 +95,14 @@ cd backend && npm start
 cd frontend && npm run dev
 ```
 Abre en tu navegador: [http://localhost:5173](http://localhost:5173)
+
+
+## Revisión de reproducción (14/11/2026)
+
+El panel de servidores incorpora **Diagnosticar espejos**, **Probar siguiente** y **Abrir fuente directa** (HLS/MP4/WebM). Las páginas externas pueden estar caídas o impedir el uso de iframe; HTTP 200 no garantiza que un título se reproduzca. El DSP y la conversión de audio solo pueden actuar sobre fuentes locales o directas compatibles.
+
+La corrección de FFmpeg, los ajustes de subtítulos y la propuesta de IA están documentados en [REVIEW_PLAYBACK.md](REVIEW_PLAYBACK.md). Validación: `npm test` en `backend` y `npm run build` en `frontend`.
+# Actualización de fuentes, audio y subtítulos
+
+Consulta [la revisión del 15 de noviembre de 2026](REVIEW_UPDATE_2026-11-15.md) para el aislamiento de proveedores externos, fuentes directas guardadas, audio latino externo y subtítulos con Whisper local.
+

@@ -2,7 +2,9 @@ import WebTorrent from 'webtorrent';
 import os from 'os';
 import path from 'path';
 import fs from 'fs';
-import { spawn, execSync } from 'child_process';
+import { execSync } from 'child_process';
+import { parseByteRange } from '../../shared/playerUtils.mjs';
+import { probeMedia, selectAudioTrack, streamFfmpeg, waitForTorrent } from './mediaTools.js';
 
 const TEMP_DOWNLOAD_DIR = path.join(os.tmpdir(), 'streamflix-webtorrent-cache');
 const VIDEO_EXTENSIONS = new Set(['.mp4', '.mkv', '.webm', '.m4v', '.avi', '.mov', '.ts']);
@@ -18,7 +20,6 @@ const DEFAULT_TRACKERS = [
   'wss://tracker.btorrent.xyz',
 ];
 
-// Detectar si FFmpeg está disponible en el sistema para remuxing/transcodificación en vivo de MKV/AVI/AC3
 let hasFfmpeg = false;
 try {
   execSync('ffmpeg -version', { stdio: 'ignore' });
@@ -32,11 +33,12 @@ class StreamEngine {
     this.cleanTempDirectory();
 
     this.client = new WebTorrent({
-      maxConns: 55,
+      maxConns: 60,
       downloadLimit: -1,
       uploadLimit: 1024 * 512,
     });
 
+    this.mediaInfo = new Map();
     this.torrentsMap = new Map();
     this.lastAccessMap = new Map();
     this.activeStreamingHash = null;
@@ -84,6 +86,7 @@ class StreamEngine {
     }
 
     this.torrentsMap.delete(cleanHash);
+    for (const key of this.mediaInfo.keys()) if (key.startsWith(cleanHash + ':')) this.mediaInfo.delete(key);
     this.lastAccessMap.delete(cleanHash);
     if (this.activeStreamingHash === cleanHash) {
       this.activeStreamingHash = null;
@@ -107,7 +110,10 @@ class StreamEngine {
     if (!existing && typeof this.client.get === 'function') {
       try {
         const maybePromise = this.client.get(cleanHash);
-        existing = maybePromise && typeof maybePromise.then === 'function' ? await maybePromise : maybePromise;
+        existing =
+          maybePromise && typeof maybePromise.then === 'function'
+            ? await maybePromise
+            : maybePromise;
       } catch {
         // Ignorar
       }
@@ -116,33 +122,18 @@ class StreamEngine {
     if (existing) {
       this.torrentsMap.set(cleanHash, existing);
       if (existing.ready) return existing;
-      return new Promise((resolve) => {
-        if (typeof existing.once === 'function') {
-          existing.once('ready', () => resolve(existing));
-          existing.once('error', () => resolve(existing));
-        } else {
-          resolve(existing);
-        }
-      });
+      return waitForTorrent(existing);
     }
 
     const magnetUri = this.buildMagnet(cleanHash);
 
-    return new Promise((resolve, reject) => {
-      const torrent = this.client.add(magnetUri, { path: TEMP_DOWNLOAD_DIR }, (t) => {
-        try {
-          t.files.forEach((f) => f.deselect());
-        } catch {
-          // Safe ignore
-        }
-        this.torrentsMap.set(cleanHash, t);
-        resolve(t);
-      });
-
-      torrent.on('error', (err) => {
-        reject(err);
-      });
-    });
+    const torrent = this.client.add(magnetUri, { path: TEMP_DOWNLOAD_DIR });
+    this.torrentsMap.set(cleanHash, torrent);
+    try {
+      await waitForTorrent(torrent);
+      torrent.files.forEach(file => file.deselect());
+      return torrent;
+    } catch (error) { this.destroyTorrent(cleanHash, true); throw error; }
   }
 
   selectTargetVideoFile(torrent, { fileIdx = null, season = null, episode = null } = {}) {
@@ -199,9 +190,21 @@ class StreamEngine {
     }
   }
 
+  /**
+   * Sirve el stream P2P priorizando HTTP 206 Partial Content nativo para máxima velocidad de arranque,
+   * y activando el Transcodificador / Remuxer FFmpeg AAC 2.0 cuando `transcode=1` o `.avi`.
+   */
   async streamTorrent(infoHash, req, res) {
     try {
-      const { fileIdx, s, e, transcode } = req.query;
+      const {
+        fileIdx,
+        s,
+        e,
+        transcode,
+        audioEngine,
+        audioTrack = '0',
+      } = req.query;
+
       const torrent = await this.getOrAddTorrent(infoHash);
       const file = this.selectTargetVideoFile(torrent, {
         fileIdx,
@@ -217,41 +220,35 @@ class StreamEngine {
       file.select();
 
       const ext = path.extname(file.name).toLowerCase();
-      const shouldTranscode =
-        hasFfmpeg && (transcode === '1' || ext === '.avi');
+      const lowerName = file.name.toLowerCase();
+      const isHevcOrAvi =
+        ext === '.avi' ||
+        lowerName.includes('hevc') ||
+        lowerName.includes('x265') ||
+        lowerName.includes('h265');
 
-      // Modo Remux/Transcode en vivo con FFmpeg para archivos .avi o MKV con audio AC3/EAC3 incompatible con Chrome
-      if (shouldTranscode) {
-        res.writeHead(200, {
-          'Content-Type': 'video/mp4',
-          'Cache-Control': 'no-cache',
-        });
+      // Solo usar FFmpeg cuando se solicita explícitamente (transcode=1 / audioEngine=aac) o es .avi,
+      // permitiendo que HTTP 206 Range nativo arranque al instante en el navegador.
+      const shouldUseFfmpeg =
+        req.query.raw !== '1' && hasFfmpeg && (transcode === '1' || audioEngine === 'aac' || ext === '.avi');
+      if (req.query.raw !== '1' && !hasFfmpeg && (transcode === '1' || audioEngine === 'aac')) return res.status(503).json({ error: 'FFmpeg no está instalado; usa el modo original o VLC.' });
 
-        const rawStream = file.createReadStream();
-        const ffmpegProc = spawn('ffmpeg', [
-          '-i', 'pipe:0',
-          '-c:v', 'libx264',
-          '-preset', 'ultrafast',
-          '-crf', '23',
-          '-c:a', 'aac',
-          '-ac', '2',
-          '-b:a', '192k',
-          '-f', 'mp4',
-          '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
-          'pipe:1',
-        ]);
-
-        rawStream.pipe(ffmpegProc.stdin).on('error', () => {});
-        ffmpegProc.stdout.pipe(res);
-
-        req.on('close', () => {
-          try {
-            rawStream.destroy();
-            ffmpegProc.kill('SIGKILL');
-          } catch {
-            // Safe ignore
-          }
-        });
+      if (shouldUseFfmpeg) {
+        if (req.method === 'HEAD') return res.status(200).type('video/mp4').end();
+        // HTTP Range input lets FFmpeg read MP4 metadata at the end and seek without downloading the entire file first.
+        const inputUrl = new URL(req.originalUrl, 'http://127.0.0.1:' + req.socket.localPort);
+        inputUrl.searchParams.set('raw', '1'); inputUrl.searchParams.delete('startTime');
+        const infoKey = infoHash.toLowerCase() + ':' + torrent.files.indexOf(file);
+        if (!this.mediaInfo.has(infoKey)) {
+          if (this.mediaInfo.size >= 20) this.mediaInfo.delete(this.mediaInfo.keys().next().value);
+          const pending = probeMedia(inputUrl.href).then(info => { if (this.mediaInfo.has(infoKey)) this.mediaInfo.set(infoKey, info); return info; });
+          this.mediaInfo.set(infoKey, pending);
+        }
+        const info = await this.mediaInfo.get(infoKey);
+        if (req.aborted || res.destroyed) return;
+        const track = selectAudioTrack(info.audioTracks, { ...req.query, manualAudio: req.query.manualAudio === '1' });
+        const startTime = Math.max(0, Math.min(Number(req.query.startTime) || 0, Math.max(0, (info.duration || 86400) - 0.1)));
+        streamFfmpeg(inputUrl.href, req, res, { audioTrack: track, startTime, transcodeVideo: isHevcOrAvi || ['hevc', 'av1', 'mpeg4', 'mpeg2video'].includes(info.videoCodec) });
         return;
       }
 
@@ -267,9 +264,10 @@ class StreamEngine {
           'Content-Disposition': `inline; filename="${encodeURIComponent(file.name)}"`,
         });
 
+        if (req.method === 'HEAD') return res.end();
         const stream = file.createReadStream();
-        stream.on('error', () => {});
-        req.on('close', () => {
+        stream.on('error', () => res.destroy());
+        res.on('close', () => {
           try {
             stream.destroy();
           } catch {
@@ -279,18 +277,11 @@ class StreamEngine {
         return stream.pipe(res);
       }
 
-      const parts = range.replace(/bytes=/, '').split('-');
-      const start = parseInt(parts[0], 10);
-      const end = parts[1] ? parseInt(parts[1], 10) : totalSize - 1;
-
-      if (isNaN(start) || start >= totalSize || end >= totalSize || start > end) {
-        res.writeHead(416, {
-          'Content-Range': `bytes */${totalSize}`,
-        });
-        return res.end();
+      const parsedRange = parseByteRange(range, totalSize);
+      if (parsedRange.status === 416) {
+        res.writeHead(416, { 'Content-Range': 'bytes */' + totalSize }); return res.end();
       }
-
-      const chunkSize = end - start + 1;
+      const { start, end, length: chunkSize } = parsedRange;
 
       res.writeHead(206, {
         'Content-Range': `bytes ${start}-${end}/${totalSize}`,
@@ -300,9 +291,10 @@ class StreamEngine {
         'Content-Disposition': `inline; filename="${encodeURIComponent(file.name)}"`,
       });
 
+      if (req.method === 'HEAD') return res.end();
       const chunkStream = file.createReadStream({ start, end });
-      chunkStream.on('error', () => {});
-      req.on('close', () => {
+      chunkStream.on('error', () => res.destroy());
+      res.on('close', () => {
         try {
           chunkStream.destroy();
         } catch {
@@ -314,11 +306,11 @@ class StreamEngine {
       console.error(`[StreamEngine] Error sirviendo stream de ${infoHash}:`, err.message);
       if (!res.headersSent) {
         res.status(500).json({ error: 'Error al inicializar stream P2P', details: err.message });
-      }
+      } else { res.destroy(); }
     }
   }
 
-  getStatus(infoHash) {
+  getStatus(infoHash, options = {}) {
     const cleanHash = infoHash.toLowerCase().trim();
     let torrent = this.torrentsMap.get(cleanHash);
     if (!torrent && this.client.torrents) {
@@ -329,16 +321,20 @@ class StreamEngine {
       return { active: false, status: 'idle', hasFfmpeg };
     }
 
-    const file = this.selectTargetVideoFile(torrent);
+    const file = this.selectTargetVideoFile(torrent, options);
 
+    const cachedInfo = this.mediaInfo.get(cleanHash + ':' + torrent.files.indexOf(file));
+    const info = cachedInfo && !cachedInfo.then ? cachedInfo : null;
     return {
+      audioTracks: info?.audioTracks || [],
+      mediaDuration: info?.duration || null,
       active: true,
       ready: Boolean(torrent.ready),
       hasFfmpeg,
       infoHash: cleanHash,
       name: torrent.name || 'Cargando stream P2P...',
       fileName: file ? file.name : null,
-      fileSize: file ? file.length : (torrent.length || 0),
+      fileSize: file ? file.length : torrent.length || 0,
       downloadSpeed: torrent.downloadSpeed || 0,
       uploadSpeed: torrent.uploadSpeed || 0,
       progress: Math.round((torrent.progress || 0) * 100),

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import api from '../services/api.js';
 import Hls from 'hls.js';
+import CustomSelect from './CustomSelect.jsx';
 import {
   Radio,
   Search,
@@ -13,39 +14,314 @@ import {
   Minimize,
   RefreshCw,
   AlertCircle,
-  ExternalLink,
   Star,
   PlusCircle,
   X,
   Trash2,
-  Copy,
-  Check,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Sparkles,
   SkipForward,
   SkipBack,
-  Columns,
   PictureInPicture2,
+  Layers,
+  ListVideo,
 } from 'lucide-react';
 
-const CATEGORY_TABS = [
-  { id: 'Todos', label: 'Todos', icon: '📺' },
-  { id: 'Favoritos', label: 'Favoritos', icon: '⭐' },
-  { id: 'Pluto TV 24/7', label: 'Pluto TV', icon: '🍿' },
-  { id: 'Deportes', label: 'Deportes', icon: '⚽' },
-  { id: 'Películas y Series', label: 'Cine & Series', icon: '🎬' },
-  { id: 'Noticias', label: 'Noticias', icon: '📰' },
-  { id: 'Infantil y Anime', label: 'Infantil & Anime', icon: '🧸' },
-  { id: 'Colombia', label: 'Colombia', icon: '🇨🇴' },
-  { id: 'México', label: 'México', icon: '🇲🇽' },
-  { id: 'Argentina', label: 'Argentina', icon: '🇦🇷' },
-  { id: 'España', label: 'España', icon: '🇪🇸' },
-  { id: 'Música', label: 'Música', icon: '🎵' },
-  { id: 'Entretenimiento', label: 'Entretenimiento', icon: '🎭' },
+// Géneros y Regiones de TV organizados estilo Netflix Live
+const TV_GENRE_OPTIONS = [
+  {
+    id: 'Todos',
+    value: 'Todos',
+    label: 'Todos los Géneros (Inicio Live)',
+    icon: '✨',
+    badge: 'NETFLIX LIVE',
+    description: 'Explorador curado por filas temáticas y canales estrella en directo',
+  },
+  {
+    id: 'Favoritos',
+    value: 'Favoritos',
+    label: 'Mi Lista de Canales',
+    icon: '⭐',
+    description: 'Tus señales favoritas guardadas para sintonizar con 1 clic',
+  },
+  {
+    id: 'CineSeries',
+    value: 'CineSeries',
+    label: 'Cine & Series 24/7 (Maratones)',
+    icon: '🍿',
+    badge: 'CINE 24/7',
+    description: 'Canales continuos de películas, acción, suspenso y series de Pluto TV & cable',
+  },
+  {
+    id: 'Deportes',
+    value: 'Deportes',
+    label: 'Deportes en Directo',
+    icon: '⚽',
+    badge: 'LIVE SPORTS',
+    description: 'Fútbol en vivo, torneos internacionales y análisis deportivo 24h',
+  },
+  {
+    id: 'Colombia',
+    value: 'Colombia',
+    label: 'Televisión de Colombia',
+    icon: '🇨🇴',
+    badge: 'LOCAL',
+    description: 'Canales nacionales y regionales de Colombia en alta definición',
+  },
+  {
+    id: 'Latam',
+    value: 'Latam',
+    label: 'México, Argentina & Latinoamérica',
+    icon: '🇲🇽',
+    description: 'Señales abiertas y de entretenimiento de México, Argentina y toda Latam',
+  },
+  {
+    id: 'España',
+    value: 'España',
+    label: 'Televisión de España',
+    icon: '🇪🇸',
+    description: 'Canales generales y temáticos de España en vivo',
+  },
+  {
+    id: 'Infantil y Anime',
+    value: 'Infantil y Anime',
+    label: 'Anime 24/7, Gaming & Animación',
+    icon: '🎌',
+    badge: 'ANIME',
+    description: 'Transmisión continua de anime, cultura geek y animación clásica',
+  },
+  {
+    id: 'Noticias',
+    value: 'Noticias',
+    label: 'Noticias & Actualidad Global',
+    icon: '📰',
+    description: 'Cobertura informativa internacional en tiempo real',
+  },
+  {
+    id: 'MúsicaEntretenimiento',
+    value: 'MúsicaEntretenimiento',
+    label: 'Música, Conciertos & Variedades',
+    icon: '🎵',
+    description: 'Canales musicales 24/7, conciertos y estilo de vida',
+  },
 ];
 
-const INITIAL_BATCH_SIZE = 72;
-const BATCH_INCREMENT = 72;
+const INITIAL_BATCH_SIZE = 60;
+const BATCH_INCREMENT = 60;
+
+/**
+ * Devuelve un degradado atmosférico de cine según la categoría del canal
+ * para que cada tarjeta 16:9 luzca como una miniatura panorámica de Netflix.
+ */
+function getChannelCardTheme(category = '', country = '') {
+  const c = (category || '').toLowerCase();
+  if (c.includes('deporte')) {
+    return 'from-emerald-950/90 via-[#141f18] to-[#0e0e0e] border-emerald-500/20';
+  }
+  if (c.includes('película') || c.includes('pluto')) {
+    return 'from-[#36090c] via-[#1a1012] to-[#0e0e0e] border-red-500/20';
+  }
+  if (c.includes('anime') || c.includes('infantil')) {
+    return 'from-orange-950/90 via-[#1e130d] to-[#0e0e0e] border-orange-500/20';
+  }
+  if (c.includes('noticia')) {
+    return 'from-sky-950/90 via-[#0f1922] to-[#0e0e0e] border-sky-500/20';
+  }
+  if (country === 'co' || c.includes('colombia')) {
+    return 'from-amber-950/85 via-[#1c160d] to-[#0e0e0e] border-amber-500/20';
+  }
+  return 'from-neutral-900 via-[#161616] to-[#0e0e0e] border-white/10';
+}
+
+/**
+ * Tarjeta Panorámica 16:9 Estilo Netflix Live
+ */
+function NetflixChannelCard({
+  channel,
+  isActive,
+  isFav,
+  onSelect,
+  onToggleFavorite,
+  isFixedWidth = true,
+}) {
+  const themeClass = getChannelCardTheme(channel.category, channel.country);
+
+  return (
+    <div
+      onClick={() => onSelect(channel)}
+      className={`group relative ${
+        isFixedWidth ? 'w-64 sm:w-72 shrink-0' : 'w-full'
+      } rounded-2xl overflow-hidden bg-gradient-to-br ${themeClass} border cursor-pointer select-none netflix-card-transition ${
+        isActive
+          ? 'ring-2 ring-[#E50914] border-[#E50914] shadow-[0_14px_38px_rgba(229,9,20,0.35)]'
+          : 'hover:border-white/30'
+      }`}
+    >
+      {/* Lienzo 16:9 Estilo Netflix */}
+      <div className="aspect-video w-full relative p-4 flex flex-col justify-between overflow-hidden">
+        {/* Resplandor ambiental decorativo */}
+        <div className="absolute -right-10 -top-10 w-32 h-32 rounded-full bg-[#E50914]/10 blur-2xl pointer-events-none group-hover:bg-[#E50914]/25 transition-all duration-500" />
+
+        {/* Fila Superior: Insignia DIRECTO + Botón Favorito */}
+        <div className="relative z-10 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5">
+            <span className="w-4 h-4 rounded bg-[#E50914] text-white font-black text-[9px] flex items-center justify-center shadow">
+              N
+            </span>
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/65 backdrop-blur-md border border-white/15 text-[9px] font-black uppercase tracking-wider text-white">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#E50914] animate-pulse" />
+              {isActive ? 'REPRODUCIENDO' : 'EN VIVO'}
+            </span>
+          </div>
+
+          <button
+            type="button"
+            onClick={(e) => onToggleFavorite(channel, e)}
+            className={`w-7 h-7 rounded-full flex items-center justify-center backdrop-blur-md border transition-transform hover:scale-110 ${
+              isFav
+                ? 'bg-amber-500/25 border-amber-400/50 text-amber-300'
+                : 'bg-black/50 border-white/15 text-neutral-400 hover:text-white'
+            }`}
+            title={isFav ? 'Quitar de Mi Lista de Canales' : 'Guardar en Mi Lista de Canales'}
+          >
+            <Star className={`w-3.5 h-3.5 ${isFav ? 'fill-current text-amber-400' : ''}`} />
+          </button>
+        </div>
+
+        {/* Centro: Logo del Canal en Alta Definición */}
+        <div className="relative z-10 my-auto flex items-center justify-center py-1">
+          <div className="w-20 h-14 sm:w-24 sm:h-16 rounded-xl bg-black/55 backdrop-blur-md border border-white/10 p-2 flex items-center justify-center shadow-xl group-hover:scale-110 transition-transform duration-300">
+            <img
+              src={channel.logo}
+              alt={channel.name}
+              loading="lazy"
+              className="w-full h-full object-contain"
+              onError={(e) => {
+                e.target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(
+                  channel.name
+                )}&background=E50914&color=fff&size=128&bold=true`;
+              }}
+            />
+          </div>
+        </div>
+
+        {/* Fila Inferior: Nombre del Canal + Metadatos */}
+        <div className="relative z-10">
+          <h4
+            className={`text-xs sm:text-sm font-black truncate drop-shadow ${
+              isActive ? 'text-red-400' : 'text-white group-hover:text-red-300'
+            }`}
+          >
+            {channel.name}
+          </h4>
+          <div className="flex items-center justify-between text-[10px] text-neutral-300/90 mt-0.5">
+            <span className="truncate">
+              {channel.category} • {channel.countryName || 'Global'}
+            </span>
+            <span className="font-bold text-emerald-400 shrink-0 ml-2">HD</span>
+          </div>
+        </div>
+
+        {/* Overlay de Reproducción Instantánea en Hover */}
+        <div className="absolute inset-0 bg-black/45 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center z-20">
+          <div className="w-11 h-11 rounded-full bg-white text-black flex items-center justify-center shadow-[0_0_25px_rgba(255,255,255,0.5)] transform scale-90 group-hover:scale-105 transition-transform">
+            <Play className="w-5 h-5 fill-current ml-0.5" />
+          </div>
+        </div>
+
+        {/* Barra de Progreso de Emisión En Vivo Estilo Netflix */}
+        <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/10 z-20">
+          <div
+            className={`h-full bg-[#E50914] ${
+              isActive ? 'w-full shadow-[0_0_8px_#E50914]' : 'w-2/3'
+            }`}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Carrusel Horizontal de Canales 16:9 Estilo Netflix
+ */
+function ChannelRowCarousel({
+  title,
+  subtitle = null,
+  channels = [],
+  currentChannel,
+  onSelectChannel,
+  onToggleFavorite,
+  isFavorite,
+}) {
+  const rowRef = useRef(null);
+  const [scrolling, setScrolling] = useState(false);
+
+  if (!channels || channels.length === 0) return null;
+
+  const scrollRow = (dir) => {
+    if (!rowRef.current) return;
+    setScrolling(true);
+    rowRef.current.scrollBy({
+      left: dir === 'left' ? -760 : 760,
+      behavior: 'smooth',
+    });
+    setTimeout(() => setScrolling(false), 400);
+  };
+
+  return (
+    <div className="relative group/chrow py-3.5 px-4 sm:px-8 lg:px-12 max-w-[1480px] mx-auto animate-rowReveal">
+      <div className="flex items-end justify-between mb-3">
+        <div>
+          <h3 className="text-lg sm:text-2xl font-extrabold text-white tracking-tight flex items-center gap-2.5">
+            <span className="w-1.5 h-5 bg-[#E50914] rounded-full inline-block shadow-[0_0_8px_#E50914]" />
+            <span>{title}</span>
+          </h3>
+          {subtitle && <p className="text-xs text-neutral-400 mt-0.5 ml-4">{subtitle}</p>}
+        </div>
+        <span className="text-[11px] text-neutral-500 font-semibold">
+          {channels.length} canales
+        </span>
+      </div>
+
+      <button
+        type="button"
+        onClick={() => scrollRow('left')}
+        className="hidden md:flex absolute left-1 top-1/2 z-30 w-11 h-28 -translate-y-1/2 bg-black/80 hover:bg-[#E50914] text-white rounded-r-2xl items-center justify-center opacity-0 group-hover/chrow:opacity-100 transition-all duration-300 hover:scale-105 border-y border-r border-white/15 backdrop-blur-md shadow-2xl"
+      >
+        <ChevronLeft className="w-7 h-7" />
+      </button>
+      <button
+        type="button"
+        onClick={() => scrollRow('right')}
+        className="hidden md:flex absolute right-1 top-1/2 z-30 w-11 h-28 -translate-y-1/2 bg-black/80 hover:bg-[#E50914] text-white rounded-l-2xl items-center justify-center opacity-0 group-hover/chrow:opacity-100 transition-all duration-300 hover:scale-105 border-y border-l border-white/15 backdrop-blur-md shadow-2xl"
+      >
+        <ChevronRight className="w-7 h-7" />
+      </button>
+
+      <div
+        ref={rowRef}
+        className={`flex items-stretch gap-4 overflow-x-auto no-scrollbar pb-4 pt-1 -mx-4 px-4 sm:-mx-8 sm:px-8 scroll-smooth transition-transform duration-300 ${
+          scrolling ? 'scale-[0.995]' : 'scale-100'
+        }`}
+      >
+        {channels.slice(0, 28).map((ch) => (
+          <NetflixChannelCard
+            key={`row-${title}-${ch.url}`}
+            channel={ch}
+            isActive={currentChannel?.url === ch.url}
+            isFav={isFavorite(ch)}
+            onSelect={onSelectChannel}
+            onToggleFavorite={onToggleFavorite}
+            isFixedWidth={true}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function LiveTV() {
   const [channels, setChannels] = useState([]);
@@ -56,8 +332,8 @@ export default function LiveTV() {
   const [searchQuery, setSearchQuery] = useState('');
   const [visibleLimit, setVisibleLimit] = useState(INITIAL_BATCH_SIZE);
 
-  // Diseño TiviMate / Apple TV+: Modo Split-View (Reproductor + Guía Lateral) vs Modo Teatro
-  const [theaterMode, setTheaterMode] = useState(false);
+  // Cajón flotante de Guía EPG Interactiva
+  const [showEpgDrawer, setShowEpgDrawer] = useState(false);
 
   const [currentChannel, setCurrentChannel] = useState(null);
   const [playerError, setPlayerError] = useState(false);
@@ -68,7 +344,6 @@ export default function LiveTV() {
   const [volume, setVolume] = useState(1);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [launchMessage, setLaunchMessage] = useState(null);
-  const [copiedUrl, setCopiedUrl] = useState(false);
 
   const [hlsLevels, setHlsLevels] = useState([]);
   const [currentLevel, setCurrentLevel] = useState(-1);
@@ -112,8 +387,10 @@ export default function LiveTV() {
   const triggerHud = useCallback(() => {
     setShowHud(true);
     if (hudTimerRef.current) clearTimeout(hudTimerRef.current);
-    hudTimerRef.current = setTimeout(() => setShowHud(false), 2600);
-  }, []);
+    hudTimerRef.current = setTimeout(() => {
+      if (!showEpgDrawer) setShowHud(false);
+    }, 3200);
+  }, [showEpgDrawer]);
 
   useEffect(() => {
     triggerHud();
@@ -185,11 +462,14 @@ export default function LiveTV() {
     });
   };
 
-  const isFavorite = (channel) => {
-    return channel ? favorites.includes(channel.url) : false;
-  };
+  const isFavorite = useCallback(
+    (channel) => {
+      return channel ? favorites.includes(channel.url) : false;
+    },
+    [favorites]
+  );
 
-  // Inicializar HLS con selección automática H.264 y Watchdog Anti-Pantalla Negra
+  // Inicializar HLS con selección automática H.264
   useEffect(() => {
     if (!currentChannel || !videoRef.current) return;
 
@@ -337,21 +617,40 @@ export default function LiveTV() {
     triggerHud();
   };
 
+  // Distribución inteligente de canales por Géneros y Regiones
   const filteredChannels = useMemo(() => {
     let result = channels;
 
     if (selectedCategory === 'Favoritos') {
       result = result.filter((c) => favorites.includes(c.url));
-    } else if (selectedCategory === 'Pluto TV 24/7') {
-      result = result.filter((c) => c.category === 'Pluto TV 24/7');
+    } else if (selectedCategory === 'CineSeries') {
+      result = result.filter(
+        (c) => c.category === 'Pluto TV 24/7' || c.category === 'Películas y Series'
+      );
+    } else if (selectedCategory === 'Deportes') {
+      result = result.filter((c) => c.category === 'Deportes');
     } else if (selectedCategory === 'Colombia') {
       result = result.filter((c) => c.country === 'co' || c.category === 'Colombia');
-    } else if (selectedCategory === 'México') {
-      result = result.filter((c) => c.country === 'mx' || c.category === 'México');
-    } else if (selectedCategory === 'Argentina') {
-      result = result.filter((c) => c.country === 'ar' || c.category === 'Argentina');
+    } else if (selectedCategory === 'Latam') {
+      result = result.filter(
+        (c) =>
+          c.country === 'mx' ||
+          c.country === 'ar' ||
+          c.country === 'cl' ||
+          c.country === 'pe' ||
+          c.category === 'México' ||
+          c.category === 'Argentina'
+      );
     } else if (selectedCategory === 'España') {
       result = result.filter((c) => c.country === 'es' || c.category === 'España');
+    } else if (selectedCategory === 'Infantil y Anime') {
+      result = result.filter((c) => c.category === 'Infantil y Anime');
+    } else if (selectedCategory === 'Noticias') {
+      result = result.filter((c) => c.category === 'Noticias');
+    } else if (selectedCategory === 'MúsicaEntretenimiento') {
+      result = result.filter(
+        (c) => c.category === 'Música' || c.category === 'Entretenimiento'
+      );
     } else if (selectedCategory !== 'Todos') {
       result = result.filter((c) => c.category === selectedCategory);
     }
@@ -367,18 +666,65 @@ export default function LiveTV() {
       );
     }
 
-    if (selectedCategory === 'Todos' && !searchQuery) {
-      const favs = [];
-      const nonFavs = [];
-      for (const ch of result) {
-        if (favorites.includes(ch.url)) favs.push(ch);
-        else nonFavs.push(ch);
-      }
-      return [...favs, ...nonFavs];
-    }
-
     return result;
   }, [channels, selectedCategory, searchQuery, favorites]);
+
+  // Carruseles horizontales curados estilo Netflix Live
+  const netflixLiveRows = useMemo(() => {
+    const favList = channels.filter((c) => favorites.includes(c.url));
+    const featuredNow = channels
+      .filter(
+        (c) =>
+          !c.isHevcHint &&
+          (c.category === 'Pluto TV 24/7' ||
+            c.category === 'Películas y Series' ||
+            c.category === 'Deportes')
+      )
+      .slice(0, 28);
+    const movies247 = channels.filter(
+      (c) => c.category === 'Pluto TV 24/7' || c.category === 'Películas y Series'
+    );
+    const sportsLive = channels.filter((c) => c.category === 'Deportes');
+    const colombiaTv = channels.filter((c) => c.country === 'co' || c.category === 'Colombia');
+    const mexicoLatam = channels.filter(
+      (c) =>
+        c.country === 'mx' ||
+        c.country === 'ar' ||
+        c.category === 'México' ||
+        c.category === 'Argentina'
+    );
+    const spainTv = channels.filter((c) => c.country === 'es' || c.category === 'España');
+    const animeGaming = channels.filter((c) => c.category === 'Infantil y Anime');
+    const newsGlobal = channels.filter((c) => c.category === 'Noticias');
+    const musicVariety = channels.filter(
+      (c) => c.category === 'Música' || c.category === 'Entretenimiento'
+    );
+
+    return {
+      favList,
+      featuredNow,
+      movies247,
+      sportsLive,
+      colombiaTv,
+      mexicoLatam,
+      spainTv,
+      animeGaming,
+      newsGlobal,
+      musicVariety,
+    };
+  }, [channels, favorites]);
+
+  const hlsSelectOptions = useMemo(() => {
+    const base = [{ value: -1, label: 'Auto H.264 HD', icon: '⚡', badge: 'SMART' }];
+    hlsLevels.forEach((lvl, idx) => {
+      base.push({
+        value: idx,
+        label: lvl.height ? `${lvl.height}p Full HD` : `Nivel ${idx + 1}`,
+        icon: '📺',
+      });
+    });
+    return base;
+  }, [hlsLevels]);
 
   const handlePrevChannel = () => {
     if (!filteredChannels.length) return;
@@ -403,7 +749,7 @@ export default function LiveTV() {
         await videoRef.current.requestPictureInPicture();
       }
     } catch {
-      // Ignore if PiP is not available
+      // Ignore
     }
   };
 
@@ -411,7 +757,7 @@ export default function LiveTV() {
     if (!currentChannel) return;
     setLaunchMessage({
       type: 'info',
-      text: 'Abriendo canal en VLC Media Player...',
+      text: 'Abriendo señal en VLC Media Player...',
     });
 
     try {
@@ -434,44 +780,6 @@ export default function LiveTV() {
     }
 
     setTimeout(() => setLaunchMessage(null), 4000);
-  };
-
-  const handleLaunchMPV = async () => {
-    if (!currentChannel) return;
-    setLaunchMessage({
-      type: 'info',
-      text: 'Abriendo MPV Player...',
-    });
-
-    try {
-      const res = await api.launchExternalPlayer({
-        player: 'mpv',
-        streamUrl: currentChannel.url,
-        title: currentChannel.name,
-      });
-
-      if (res.success) {
-        setLaunchMessage({
-          type: 'success',
-          text: '✓ Reproduciendo en MPV',
-        });
-      }
-    } catch {
-      setLaunchMessage({
-        type: 'error',
-        text: 'No se pudo conectar con MPV',
-      });
-    }
-
-    setTimeout(() => setLaunchMessage(null), 4000);
-  };
-
-  const handleCopyUrl = () => {
-    if (!currentChannel?.url) return;
-    navigator.clipboard.writeText(currentChannel.url).then(() => {
-      setCopiedUrl(true);
-      setTimeout(() => setCopiedUrl(false), 3000);
-    });
   };
 
   const togglePlay = () => {
@@ -522,9 +830,10 @@ export default function LiveTV() {
   };
 
   const handleLevelChange = (lvlIdx) => {
-    setCurrentLevel(lvlIdx);
+    const parsed = Number(lvlIdx);
+    setCurrentLevel(parsed);
     if (hlsRef.current) {
-      hlsRef.current.currentLevel = lvlIdx;
+      hlsRef.current.currentLevel = parsed;
     }
   };
 
@@ -581,444 +890,287 @@ export default function LiveTV() {
     setVisibleLimit(INITIAL_BATCH_SIZE);
   }, [selectedCategory, searchQuery]);
 
+  const selectedGenreObj = useMemo(() => {
+    return (
+      TV_GENRE_OPTIONS.find((g) => g.value === selectedCategory) || TV_GENRE_OPTIONS[0]
+    );
+  }, [selectedCategory]);
+
   return (
-    <div className="pt-2 px-4 sm:px-8 lg:px-12 max-w-[1480px] mx-auto pb-16 font-netflix">
-      {/* 1. Cabecera Broadcast Studio */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-5 border-b border-white/[0.08] pb-4">
-        <div className="flex items-center gap-3.5">
-          <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-[#E50914] to-[#80040a] flex items-center justify-center shadow-[0_8px_24px_rgba(229,9,20,0.4)] border border-white/15">
-            <Radio className="w-5 h-5 text-white animate-pulse" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2.5">
-              <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
-                Live TV Studio
-              </h1>
-              <span className="px-2 py-0.5 bg-[#E50914] text-white font-black text-[10px] rounded-full uppercase tracking-wider">
-                TIVIMATE VIEW
-              </span>
-            </div>
-            <p className="text-xs text-neutral-400 mt-0.5 flex items-center gap-2">
-              <span>+{channels.length.toLocaleString()} Canales FAST & IPTV</span>
-              <span>•</span>
-              <span className="text-emerald-400 font-semibold">
-                Zapping Instantáneo & Anti-Pantalla Negra
-              </span>
-            </p>
-          </div>
-        </div>
-
-        {/* Barra de Herramientas Derecha */}
-        <div className="flex items-center flex-wrap gap-2">
-          <div className="relative min-w-[210px] sm:w-64">
-            <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Buscar canal, país, deporte..."
-              className="w-full bg-neutral-900/90 border border-white/15 rounded-full pl-9 pr-8 py-2 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-[#E50914] transition"
-            />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery('')}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-white"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
-          </div>
-
-          <button
-            onClick={() => setTheaterMode(!theaterMode)}
-            className={`hidden lg:flex items-center gap-1.5 px-3.5 py-2 rounded-full text-xs font-bold border transition ${
-              theaterMode
-                ? 'bg-[#E50914] text-white border-red-400'
-                : 'bg-neutral-900 hover:bg-neutral-800 text-neutral-300 border-white/15'
-            }`}
-            title="Alternar entre Vista Dividida con Guía EPG o Modo Teatro Completo"
-          >
-            <Columns className="w-3.5 h-3.5" />
-            <span>{theaterMode ? 'Mostrar Guía Lateral' : 'Modo Teatro'}</span>
-          </button>
-
-          <button
-            onClick={() => setShowModal(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-neutral-900 hover:bg-neutral-800 text-white text-xs font-bold rounded-full border border-white/15 transition"
-          >
-            <PlusCircle className="w-4 h-4 text-emerald-400" />
-            <span>+ Lista M3U / Xtream</span>
-          </button>
-
-          <button
-            onClick={() => loadChannels(true)}
-            disabled={refreshing}
-            className="p-2 bg-neutral-900 hover:bg-neutral-800 text-neutral-300 hover:text-white rounded-full border border-white/15 transition"
-            title="Refrescar lista de canales"
-          >
-            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin text-[#E50914]' : ''}`} />
-          </button>
-        </div>
-      </div>
-
-      {/* 2. Categorías en Píldoras */}
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-3 mb-5 no-scrollbar">
-        {CATEGORY_TABS.map((tab) => {
-          const isSelected = selectedCategory === tab.id;
-          return (
-            <button
-              key={tab.id}
-              onClick={() => setSelectedCategory(tab.id)}
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all duration-200 ${
-                isSelected
-                  ? 'bg-[#E50914] text-white shadow-lg shadow-red-950/50 ring-1 ring-red-400'
-                  : 'bg-[#161616] hover:bg-neutral-800 text-neutral-300 hover:text-white border border-white/[0.08]'
-              }`}
-            >
-              <span>{tab.icon}</span>
-              <span>{tab.label}</span>
-              {tab.id === 'Favoritos' && favorites.length > 0 && (
-                <span className="px-1.5 py-0.2 bg-amber-400/20 text-amber-300 text-[10px] rounded-full font-black">
-                  {favorites.length}
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* 3. ESTUDIO PRINCIPAL SPLIT-VIEW (Reproductor No Invasivo + Guía Lateral de Zapping Instantáneo) */}
+    <div className="pb-16 font-netflix select-none bg-[#141414]">
+      {/* 1. ESCENARIO HERO FULL-BLEED ESTILO PRODUCTO NETFLIX LIVE */}
       {currentChannel && (
         <div
-          className={`grid grid-cols-1 ${
-            theaterMode ? 'lg:grid-cols-1' : 'lg:grid-cols-12'
-          } gap-5 mb-9`}
+          ref={playerContainerRef}
+          onMouseMove={triggerHud}
+          className="relative w-full h-[78vh] sm:h-[84vh] lg:h-[88vh] bg-black overflow-hidden select-none"
         >
-          {/* Panel Izquierdo: Monitor de Transmisión en Vivo */}
-          <div className={theaterMode ? 'col-span-1' : 'lg:col-span-8'}>
-            <div
-              ref={playerContainerRef}
-              onMouseMove={triggerHud}
-              className="relative bg-black rounded-2xl overflow-hidden border border-white/15 shadow-[0_24px_60px_rgba(0,0,0,0.95)] aspect-video w-full"
-            >
-              {/* Video Absoluto (0 Colapso de Altura) */}
-              <video
-                ref={videoRef}
-                className={`absolute inset-0 w-full h-full object-contain z-10 cursor-pointer bg-black transition-all ${
-                  cinemaBoost ? 'contrast-[1.06] saturate-[1.08] brightness-[1.02]' : ''
-                }`}
-                playsInline
-                autoPlay
-                onClick={togglePlay}
-                onLoadedMetadata={(e) => {
-                  const vw = e.currentTarget.videoWidth;
-                  const vh = e.currentTarget.videoHeight;
-                  setVideoDimensions({ width: vw, height: vh });
-                  if (vw > 0 && vh > 0) setAudioOnlyWarning(false);
-                }}
-                onResize={(e) => {
-                  const vw = e.currentTarget.videoWidth;
-                  const vh = e.currentTarget.videoHeight;
-                  setVideoDimensions({ width: vw, height: vh });
-                  if (vw > 0 && vh > 0) setAudioOnlyWarning(false);
-                }}
-              />
+          {/* Video En Directo a Pantalla Completa dentro del Billboard */}
+          <video
+            ref={videoRef}
+            className={`absolute inset-0 w-full h-full object-contain z-10 cursor-pointer bg-black transition-all ${
+              cinemaBoost ? 'contrast-[1.06] saturate-[1.08] brightness-[1.02]' : ''
+            }`}
+            playsInline
+            autoPlay
+            onClick={togglePlay}
+            onLoadedMetadata={(e) => {
+              const vw = e.currentTarget.videoWidth;
+              const vh = e.currentTarget.videoHeight;
+              setVideoDimensions({ width: vw, height: vh });
+              if (vw > 0 && vh > 0) setAudioOnlyWarning(false);
+            }}
+            onResize={(e) => {
+              const vw = e.currentTarget.videoWidth;
+              const vh = e.currentTarget.videoHeight;
+              setVideoDimensions({ width: vw, height: vh });
+              if (vw > 0 && vh > 0) setAudioOnlyWarning(false);
+            }}
+          />
 
-              {/* HUD Superior Flotante Minimalista (Se oculta tras 2.6s de inactividad) */}
-              <div
-                className={`absolute top-3 left-3 right-3 z-30 flex items-center justify-between gap-2 pointer-events-none transition-all duration-500 ${
-                  showHud || !isPlaying
-                    ? 'opacity-100 translate-y-0'
-                    : 'opacity-0 -translate-y-3 pointer-events-none'
-                }`}
-              >
-                <div className="pointer-events-auto flex items-center gap-2.5 bg-black/75 backdrop-blur-xl border border-white/15 px-3 py-1.5 rounded-full shadow-lg">
-                  <img
-                    src={currentChannel.logo}
-                    alt={currentChannel.name}
-                    className="w-6 h-6 object-contain rounded"
-                    onError={(e) => {
-                      e.target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(
-                        currentChannel.name
-                      )}&background=E50914&color=fff&size=64&bold=true`;
-                    }}
-                  />
-                  <span className="text-xs sm:text-sm font-extrabold text-white truncate max-w-[180px] sm:max-w-xs">
-                    {currentChannel.name}
-                  </span>
-                  <span className="flex items-center gap-1 px-2 py-0.5 bg-[#E50914] text-white font-black text-[9px] rounded-full uppercase">
-                    <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-                    LIVE
-                  </span>
-                  {videoDimensions.height > 0 && (
-                    <span className="hidden sm:inline-block px-2 py-0.5 bg-emerald-500/20 text-emerald-300 font-mono text-[10px] font-bold rounded-full">
-                      {videoDimensions.height}p
-                    </span>
-                  )}
-                </div>
+          {/* Degradados Cinemáticos de Netflix (se atenúan cuando el HUD se oculta para ver limpio) */}
+          <div
+            className={`absolute inset-0 bg-gradient-to-r from-[#141414] via-[#141414]/65 to-transparent w-full md:w-[68%] z-20 pointer-events-none transition-opacity duration-500 ${
+              showHud ? 'opacity-100' : 'opacity-25'
+            }`}
+          />
+          <div className="absolute bottom-0 left-0 right-0 h-40 bg-gradient-to-t from-[#141414] via-[#141414]/85 to-transparent z-20 pointer-events-none" />
+          <div className="absolute top-0 left-0 right-0 h-28 bg-gradient-to-b from-black/80 to-transparent z-20 pointer-events-none" />
 
-                {/* Controles Rápidos Flotantes Arriba-Derecha */}
-                <div className="pointer-events-auto flex items-center gap-1.5">
-                  <button
-                    onClick={handlePrevChannel}
-                    className="p-2 rounded-full bg-black/75 hover:bg-white/20 text-white border border-white/15 backdrop-blur-xl transition"
-                    title="Canal anterior (CH-)"
-                  >
-                    <SkipBack className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    onClick={handleNextChannel}
-                    className="p-2 rounded-full bg-black/75 hover:bg-white/20 text-white border border-white/15 backdrop-blur-xl transition"
-                    title="Siguiente canal (CH+)"
-                  >
-                    <SkipForward className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    onClick={(e) => toggleFavorite(currentChannel, e)}
-                    className={`p-2 rounded-full border backdrop-blur-xl transition ${
-                      isFavorite(currentChannel)
-                        ? 'bg-amber-500/30 text-amber-300 border-amber-400'
-                        : 'bg-black/75 text-neutral-300 hover:text-white border-white/15'
-                    }`}
-                  >
-                    <Star
-                      className={`w-3.5 h-3.5 ${
-                        isFavorite(currentChannel) ? 'fill-current text-amber-400' : ''
-                      }`}
-                    />
-                  </button>
-                  <button
-                    onClick={handleLaunchVLC}
-                    className="px-3 py-1.5 rounded-full bg-orange-600/90 hover:bg-orange-500 text-white text-[11px] font-extrabold shadow transition"
-                  >
-                    VLC
-                  </button>
-                </div>
+          {/* Información Editorial del Canal En Directo Estilo Billboard Netflix */}
+          <div
+            key={`hero-live-${currentChannel.url}`}
+            className={`absolute bottom-24 sm:bottom-28 left-4 sm:left-8 lg:left-12 max-w-xl z-30 space-y-3.5 transition-all duration-500 ${
+              showHud
+                ? 'opacity-100 translate-y-0'
+                : 'opacity-0 translate-y-4 pointer-events-none'
+            }`}
+          >
+            <div className="flex flex-wrap items-center gap-2.5">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[#E50914] font-black text-xl leading-none">N</span>
+                <span className="text-neutral-200 uppercase tracking-[0.25em] text-[11px] font-extrabold">
+                  EN DIRECTO
+                </span>
               </div>
 
-              {launchMessage && (
-                <div className="absolute top-16 left-1/2 -translate-x-1/2 z-40 bg-black/90 border border-white/20 text-white px-4 py-2 rounded-full text-xs font-bold shadow-2xl backdrop-blur-xl animate-fadeIn">
-                  {launchMessage.text}
-                </div>
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded bg-[#E50914] text-white text-[10px] font-black uppercase tracking-wider shadow-[0_0_15px_rgba(229,9,20,0.6)]">
+                <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                EN VIVO AHORA
+              </span>
+
+              {/* Ecualizador animado de señal activa */}
+              <div className="flex items-end gap-0.5 h-3.5 px-2 py-0.5 rounded bg-black/50 border border-white/10">
+                <span className="w-0.5 h-full bg-emerald-400 animate-eq-1 rounded-full" />
+                <span className="w-0.5 h-full bg-emerald-400 animate-eq-2 rounded-full" />
+                <span className="w-0.5 h-full bg-emerald-400 animate-eq-3 rounded-full" />
+              </div>
+
+              {videoDimensions.height > 0 && (
+                <span className="px-2 py-0.5 bg-black/60 border border-emerald-500/40 text-emerald-300 font-mono text-[10px] font-extrabold rounded">
+                  {videoDimensions.height}p FULL HD
+                </span>
               )}
 
-              {/* Alerta Watchdog Audio sin Video (HEVC/H.265) */}
-              {audioOnlyWarning && !playerError && (
-                <div className="absolute inset-0 bg-black/85 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center z-20 space-y-3 animate-fadeIn">
-                  <div className="w-11 h-11 rounded-full bg-amber-500/20 border border-amber-500 flex items-center justify-center text-amber-400">
-                    <AlertCircle className="w-5 h-5" />
-                  </div>
-                  <div className="max-w-md space-y-1">
-                    <h3 className="text-sm sm:text-base font-black text-white">
-                      Señal en códec HEVC / H.265 de cable detectada
-                    </h3>
-                    <p className="text-xs text-neutral-300">
-                      El audio AAC está activo, pero el video usa HEVC nativo. Ábrelo con imagen completa en VLC o pasa al siguiente canal.
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap items-center justify-center gap-2">
-                    <button
-                      onClick={handleLaunchVLC}
-                      className="px-4 py-2 bg-orange-600 hover:bg-orange-500 text-white font-extrabold text-xs rounded-full shadow"
-                    >
-                      ▶ Abrir Imagen en VLC
-                    </button>
-                    <button
-                      onClick={handleNextChannel}
-                      className="px-4 py-2 bg-[#E50914] hover:bg-red-700 text-white font-extrabold text-xs rounded-full"
-                    >
-                      Siguiente Canal ⏭
-                    </button>
-                    <button
-                      onClick={() => setAudioOnlyWarning(false)}
-                      className="px-3 py-2 bg-neutral-800 text-neutral-300 text-xs rounded-full"
-                    >
-                      Ocultar aviso
-                    </button>
-                  </div>
-                </div>
-              )}
+              <span className="px-2 py-0.5 bg-white/10 border border-white/15 text-neutral-200 text-[10px] font-bold rounded">
+                {currentChannel.category} • {currentChannel.countryName || 'Internacional'}
+              </span>
+            </div>
 
-              {/* Overlay de Canal Fuera del Aire */}
-              {playerError && (
-                <div className="absolute inset-0 bg-black/90 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center z-20 space-y-3 animate-fadeIn">
-                  <AlertCircle className="w-10 h-10 text-[#E50914]" />
-                  <div className="max-w-sm space-y-1">
-                    <h3 className="text-sm sm:text-base font-black text-white">
-                      Señal temporalmente no disponible en navegador
-                    </h3>
-                    <p className="text-xs text-neutral-400">
-                      Prueba en VLC Media Player, alterna el Proxy o pasa al siguiente canal.
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap items-center justify-center gap-2">
-                    <button
-                      onClick={handleLaunchVLC}
-                      className="px-4 py-2 bg-orange-600 hover:bg-orange-500 text-white font-extrabold text-xs rounded-full"
-                    >
-                      ▶ Abrir en VLC
-                    </button>
-                    <button
-                      onClick={handleNextChannel}
-                      className="px-4 py-2 bg-[#E50914] hover:bg-red-700 text-white font-extrabold text-xs rounded-full"
-                    >
-                      Siguiente Canal ⏭
-                    </button>
-                    <button
-                      onClick={() => {
-                        setUsingProxy(!usingProxy);
-                        setPlayerError(false);
-                      }}
-                      className="px-3.5 py-2 bg-neutral-800 text-neutral-200 font-bold text-xs rounded-full border border-white/15"
-                    >
-                      Modo {usingProxy ? 'Directo' : 'Proxy'}
-                    </button>
-                  </div>
-                </div>
-              )}
+            <div className="flex items-center gap-4">
+              <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-black/80 backdrop-blur-xl border border-white/15 p-2 flex items-center justify-center shrink-0 shadow-2xl">
+                <img
+                  src={currentChannel.logo}
+                  alt={currentChannel.name}
+                  className="w-full h-full object-contain"
+                  onError={(e) => {
+                    e.target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(
+                      currentChannel.name
+                    )}&background=E50914&color=fff&size=128&bold=true`;
+                  }}
+                />
+              </div>
+              <h1 className="text-3xl sm:text-5xl font-black text-white tracking-tight drop-shadow-[0_6px_24px_rgba(0,0,0,0.95)] leading-tight line-clamp-2">
+                {currentChannel.name}
+              </h1>
+            </div>
 
-              {/* HUD Inferior Flotante Minimalista */}
-              <div
-                className={`absolute bottom-3 left-3 right-3 z-30 bg-black/75 backdrop-blur-xl border border-white/15 rounded-full px-4 py-2 flex items-center justify-between transition-all duration-500 ${
-                  showHud || !isPlaying
-                    ? 'opacity-100 translate-y-0'
-                    : 'opacity-0 translate-y-3 pointer-events-none'
+            <p className="text-xs sm:text-sm text-neutral-200/90 max-w-lg drop-shadow">
+              Estás viendo la señal oficial en directo de{' '}
+              <strong className="text-white">{currentChannel.name}</strong> con conmutación H.264
+              instantánea y motor de nitidez activo.
+            </p>
+
+            {/* Botones Principales Estilo Netflix */}
+            <div className="flex items-center flex-wrap gap-2.5 pt-1">
+              <button
+                type="button"
+                onClick={toggleFullscreen}
+                className="flex items-center gap-2 px-6 py-2.5 bg-white hover:bg-neutral-200 text-black font-extrabold text-xs sm:text-sm rounded-md shadow-[0_8px_25px_rgba(255,255,255,0.25)] transition-all hover:scale-105"
+              >
+                <Maximize className="w-4 h-4" />
+                <span>Pantalla Completa</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handlePrevChannel}
+                className="flex items-center gap-1.5 px-4 py-2.5 bg-neutral-500/40 hover:bg-neutral-500/60 text-white font-bold text-xs sm:text-sm rounded-md backdrop-blur-md border border-white/15 transition-all hover:scale-105"
+              >
+                <SkipBack className="w-4 h-4" />
+                <span>Canal Ant.</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleNextChannel}
+                className="flex items-center gap-1.5 px-4 py-2.5 bg-neutral-500/40 hover:bg-neutral-500/60 text-white font-bold text-xs sm:text-sm rounded-md backdrop-blur-md border border-white/15 transition-all hover:scale-105"
+              >
+                <span>Siguiente</span>
+                <SkipForward className="w-4 h-4" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowEpgDrawer((prev) => !prev)}
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-md font-bold text-xs sm:text-sm backdrop-blur-md border transition-all hover:scale-105 ${
+                  showEpgDrawer
+                    ? 'bg-[#E50914] text-white border-red-400 shadow-lg'
+                    : 'bg-black/60 hover:bg-black/80 text-white border-white/20'
                 }`}
               >
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={togglePlay}
-                    className="text-white hover:text-[#E50914] transition"
-                  >
-                    {isPlaying ? (
-                      <Pause className="w-4 h-4 fill-current" />
-                    ) : (
-                      <Play className="w-4 h-4 fill-current" />
-                    )}
-                  </button>
+                <ListVideo className="w-4 h-4" />
+                <span>Guía de Canales</span>
+              </button>
 
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={toggleMute}
-                      className="text-white hover:text-[#E50914] transition"
-                    >
-                      {isMuted || volume === 0 ? (
-                        <VolumeX className="w-4 h-4 text-[#E50914]" />
-                      ) : (
-                        <Volume2 className="w-4 h-4" />
-                      )}
-                    </button>
-                    <input
-                      type="range"
-                      min="0"
-                      max="1"
-                      step="0.05"
-                      value={isMuted ? 0 : volume}
-                      onChange={handleVolumeChange}
-                      className="w-16 sm:w-20 h-1 bg-neutral-700 rounded-lg appearance-none cursor-pointer accent-[#E50914]"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  {hlsLevels.length > 1 && (
-                    <select
-                      value={currentLevel}
-                      onChange={(e) => handleLevelChange(Number(e.target.value))}
-                      className="bg-white/10 text-white border border-white/15 rounded-full px-2.5 py-0.5 text-[10px] font-bold focus:outline-none"
-                    >
-                      <option value={-1} className="bg-neutral-900">
-                        Auto H.264
-                      </option>
-                      {hlsLevels.map((lvl, idx) => (
-                        <option key={idx} value={idx} className="bg-neutral-900">
-                          {lvl.height ? `${lvl.height}p` : `Nivel ${idx + 1}`}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-
-                  <button
-                    onClick={() => setCinemaBoost(!cinemaBoost)}
-                    className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border transition flex items-center gap-1 ${
-                      cinemaBoost
-                        ? 'bg-red-600/30 text-red-200 border-red-500/50'
-                        : 'bg-white/5 text-neutral-400 border-white/10'
-                    }`}
-                  >
-                    <Sparkles className="w-3 h-3" />
-                    <span className="hidden sm:inline">Nitidez</span>
-                  </button>
-
-                  <button
-                    onClick={() => setUsingProxy(!usingProxy)}
-                    className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full border transition ${
-                      usingProxy
-                        ? 'bg-amber-500/25 text-amber-300 border-amber-500/50'
-                        : 'bg-white/5 text-neutral-300 border-white/10'
-                    }`}
-                  >
-                    {usingProxy ? 'Proxy ON' : 'Directo'}
-                  </button>
-
-                  <button
-                    onClick={togglePiP}
-                    className="p-1 text-neutral-300 hover:text-white transition hidden sm:inline-flex"
-                    title="Picture-in-Picture (Mini ventana flotante)"
-                  >
-                    <PictureInPicture2 className="w-4 h-4" />
-                  </button>
-
-                  <button
-                    onClick={toggleFullscreen}
-                    className="p-1 text-white hover:text-[#E50914] transition"
-                    title="Pantalla completa"
-                  >
-                    {isFullscreen ? (
-                      <Minimize className="w-4 h-4" />
-                    ) : (
-                      <Maximize className="w-4 h-4" />
-                    )}
-                  </button>
-                </div>
-              </div>
+              <button
+                type="button"
+                onClick={(e) => toggleFavorite(currentChannel, e)}
+                className={`flex items-center gap-1.5 px-3.5 py-2.5 rounded-md font-bold text-xs sm:text-sm backdrop-blur-md border transition-all hover:scale-105 ${
+                  isFavorite(currentChannel)
+                    ? 'bg-amber-500/25 text-amber-300 border-amber-400/50'
+                    : 'bg-black/60 hover:bg-black/80 text-white border-white/20'
+                }`}
+              >
+                <Star
+                  className={`w-4 h-4 ${
+                    isFavorite(currentChannel) ? 'fill-current text-amber-400' : ''
+                  }`}
+                />
+                <span className="hidden sm:inline">
+                  {isFavorite(currentChannel) ? 'En Mi Lista' : 'Mi Lista'}
+                </span>
+              </button>
             </div>
           </div>
 
-          {/* Panel Derecho: Guía Rápida de Zapping (EPG Sidebar estilo TiviMate) */}
-          {!theaterMode && (
-            <div className="lg:col-span-4 bg-[#141414] rounded-2xl border border-white/10 flex flex-col overflow-hidden h-[360px] lg:h-auto lg:max-h-[450px] shadow-2xl">
-              <div className="p-3.5 border-b border-white/10 flex items-center justify-between bg-neutral-900/80">
+          {/* Barra Flotante Derecha de Audio/Calidad en el Billboard */}
+          <div
+            className={`absolute bottom-24 sm:bottom-28 right-4 sm:right-8 z-30 flex items-center gap-2.5 transition-opacity duration-500 ${
+              showHud ? 'opacity-100' : 'opacity-0 pointer-events-none'
+            }`}
+          >
+            {hlsLevels.length > 1 && (
+              <CustomSelect
+                options={hlsSelectOptions}
+                value={currentLevel}
+                onChange={handleLevelChange}
+                size="sm"
+                align="right"
+              />
+            )}
+
+            <button
+              type="button"
+              onClick={() => setCinemaBoost(!cinemaBoost)}
+              className={`px-3 py-2 rounded-full text-xs font-extrabold border backdrop-blur-xl transition flex items-center gap-1.5 ${
+                cinemaBoost
+                  ? 'bg-[#E50914]/30 text-red-200 border-[#E50914]'
+                  : 'bg-black/65 text-neutral-300 border-white/20'
+              }`}
+              title="Realce de contraste y color en vivo"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">HDR Boost</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleLaunchVLC}
+              className="px-3.5 py-2 rounded-full bg-orange-600/90 hover:bg-orange-500 text-white text-xs font-extrabold shadow-lg transition"
+            >
+              VLC
+            </button>
+
+            <div className="flex items-center gap-2 bg-black/70 backdrop-blur-xl border border-white/20 px-3 py-2 rounded-full">
+              <button onClick={toggleMute} className="text-white hover:text-[#E50914] transition">
+                {isMuted || volume === 0 ? (
+                  <VolumeX className="w-4 h-4 text-[#E50914]" />
+                ) : (
+                  <Volume2 className="w-4 h-4" />
+                )}
+              </button>
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                value={isMuted ? 0 : volume}
+                onChange={handleVolumeChange}
+                className="w-16 h-1 bg-neutral-600 rounded-lg appearance-none cursor-pointer accent-[#E50914]"
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={togglePiP}
+              className="w-9 h-9 rounded-full bg-black/70 hover:bg-white/20 text-white border border-white/20 hidden sm:flex items-center justify-center backdrop-blur-xl transition"
+              title="Picture-in-Picture"
+            >
+              <PictureInPicture2 className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Cajón Flotante Lateral de Guía EPG Estilo Netflix */}
+          {showEpgDrawer && (
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="absolute top-20 right-4 sm:right-8 bottom-20 w-80 sm:w-96 z-40 bg-[#121212]/96 backdrop-blur-3xl border border-white/15 ring-1 ring-[#E50914]/30 rounded-2xl shadow-[0_25px_70px_rgba(0,0,0,0.95)] flex flex-col overflow-hidden animate-fadeIn"
+            >
+              <div className="p-3.5 border-b border-white/10 flex items-center justify-between bg-black/60">
                 <div className="flex items-center gap-2">
                   <Tv className="w-4 h-4 text-[#E50914]" />
                   <span className="text-xs font-extrabold uppercase tracking-wider text-white">
-                    Guía Rápida ({selectedCategory})
+                    Guía Rápida ({filteredChannels.length} canales)
                   </span>
                 </div>
-                <span className="text-[11px] text-neutral-400 font-mono">
-                  {filteredChannels.length} ch
-                </span>
+                <button
+                  onClick={() => setShowEpgDrawer(false)}
+                  className="text-neutral-400 hover:text-white p-1"
+                >
+                  <X className="w-4 h-4" />
+                </button>
               </div>
 
-              <div className="flex-1 overflow-y-auto divide-y divide-white/[0.05] p-1.5">
-                {filteredChannels.slice(0, 80).map((ch, idx) => {
+              <div className="flex-1 overflow-y-auto divide-y divide-white/[0.05] p-2">
+                {filteredChannels.slice(0, 90).map((ch, idx) => {
                   const active = currentChannel?.url === ch.url;
                   const fav = isFavorite(ch);
                   return (
                     <div
-                      key={`guide-${ch.url}`}
+                      key={`epg-${ch.url}`}
                       onClick={() => handleSelectChannel(ch)}
-                      className={`flex items-center justify-between gap-2.5 p-2 rounded-xl cursor-pointer transition ${
+                      className={`flex items-center justify-between gap-2.5 p-2.5 rounded-xl cursor-pointer transition ${
                         active
-                          ? 'bg-[#E50914]/20 border border-[#E50914]/50 text-white'
-                          : 'hover:bg-white/[0.05] text-neutral-300'
+                          ? 'bg-[#E50914]/25 border border-[#E50914] text-white'
+                          : 'hover:bg-white/[0.06] text-neutral-300'
                       }`}
                     >
                       <div className="flex items-center gap-2.5 min-w-0">
                         <span className="text-[10px] font-mono text-neutral-500 w-5 text-right shrink-0">
                           {idx + 1}
                         </span>
-                        <div className="w-8 h-8 rounded-lg bg-black border border-white/10 flex items-center justify-center p-0.5 shrink-0">
+                        <div className="w-9 h-9 rounded-lg bg-black border border-white/10 flex items-center justify-center p-1 shrink-0">
                           <img
                             src={ch.logo}
                             alt={ch.name}
@@ -1039,137 +1191,371 @@ export default function LiveTV() {
                           >
                             {ch.name}
                           </p>
-                          <p className="text-[10px] text-neutral-500 truncate">
+                          <p className="text-[10px] text-neutral-400 truncate">
                             {ch.category} • {ch.countryName || 'Global'}
                           </p>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <button
-                          onClick={(e) => toggleFavorite(ch, e)}
-                          className={`p-1 ${
-                            fav ? 'text-amber-400' : 'text-neutral-600 hover:text-amber-400'
-                          }`}
-                        >
-                          <Star className={`w-3.5 h-3.5 ${fav ? 'fill-current' : ''}`} />
-                        </button>
-                        {active && (
-                          <span className="w-2 h-2 rounded-full bg-[#E50914] animate-pulse" />
-                        )}
-                      </div>
+                      <button
+                        onClick={(e) => toggleFavorite(ch, e)}
+                        className={`p-1 shrink-0 ${
+                          fav ? 'text-amber-400' : 'text-neutral-600 hover:text-amber-400'
+                        }`}
+                      >
+                        <Star className={`w-3.5 h-3.5 ${fav ? 'fill-current' : ''}`} />
+                      </button>
                     </div>
                   );
                 })}
               </div>
             </div>
           )}
+
+          {launchMessage && (
+            <div className="absolute top-20 left-1/2 -translate-x-1/2 z-40 bg-black/90 border border-white/20 text-white px-4 py-2 rounded-full text-xs font-bold shadow-2xl backdrop-blur-xl animate-fadeIn">
+              {launchMessage.text}
+            </div>
+          )}
+
+          {audioOnlyWarning && !playerError && (
+            <div className="absolute inset-0 bg-black/85 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center z-30 space-y-3 animate-fadeIn">
+              <div className="w-11 h-11 rounded-full bg-amber-500/20 border border-amber-500 flex items-center justify-center text-amber-400">
+                <AlertCircle className="w-5 h-5" />
+              </div>
+              <div className="max-w-md space-y-1">
+                <h3 className="text-sm sm:text-base font-black text-white">
+                  Señal en códec HEVC / H.265 detectada
+                </h3>
+                <p className="text-xs text-neutral-300">
+                  Ábrela con imagen completa en VLC o pasa al siguiente canal.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <button
+                  onClick={handleLaunchVLC}
+                  className="px-4 py-2 bg-orange-600 hover:bg-orange-500 text-white font-extrabold text-xs rounded-full shadow"
+                >
+                  ▶ Abrir en VLC
+                </button>
+                <button
+                  onClick={handleNextChannel}
+                  className="px-4 py-2 bg-[#E50914] hover:bg-red-700 text-white font-extrabold text-xs rounded-full"
+                >
+                  Siguiente Canal ⏭
+                </button>
+                <button
+                  onClick={() => setAudioOnlyWarning(false)}
+                  className="px-3 py-2 bg-neutral-800 text-neutral-300 text-xs rounded-full"
+                >
+                  Ocultar aviso
+                </button>
+              </div>
+            </div>
+          )}
+
+          {playerError && (
+            <div className="absolute inset-0 bg-black/90 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center z-30 space-y-3 animate-fadeIn">
+              <AlertCircle className="w-10 h-10 text-[#E50914]" />
+              <div className="max-w-sm space-y-1">
+                <h3 className="text-sm sm:text-base font-black text-white">
+                  Señal temporalmente no disponible en navegador
+                </h3>
+                <p className="text-xs text-neutral-400">
+                  Prueba en VLC Media Player, alterna el Proxy o pasa al siguiente canal.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <button
+                  onClick={handleLaunchVLC}
+                  className="px-4 py-2 bg-orange-600 hover:bg-orange-500 text-white font-extrabold text-xs rounded-full"
+                >
+                  ▶ Abrir en VLC
+                </button>
+                <button
+                  onClick={handleNextChannel}
+                  className="px-4 py-2 bg-[#E50914] hover:bg-red-700 text-white font-extrabold text-xs rounded-full"
+                >
+                  Siguiente Canal ⏭
+                </button>
+                <button
+                  onClick={() => {
+                    setUsingProxy(!usingProxy);
+                    setPlayerError(false);
+                  }}
+                  className="px-3.5 py-2 bg-neutral-800 text-neutral-200 font-bold text-xs rounded-full border border-white/15"
+                >
+                  Modo {usingProxy ? 'Directo' : 'Proxy'}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
-      {/* 4. Grilla Completa de Canales */}
-      <div className="flex items-center justify-between mb-3.5 text-xs text-neutral-400">
-        <span className="font-extrabold text-white uppercase tracking-wider">
-          Explorar Mosaico • {selectedCategory} ({filteredChannels.length})
-        </span>
-      </div>
+      {/* 2. SUB-BARRA DE ORGANIZACIÓN DE GÉNEROS Y REGIONES DE TV ESTILO NETFLIX */}
+      <div className="relative z-30 -mt-12 sm:-mt-16 px-4 sm:px-8 lg:px-12 max-w-[1480px] mx-auto mb-6 space-y-3.5">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-[#141414]/92 backdrop-blur-2xl px-5 py-4 rounded-2xl border border-white/10 shadow-2xl">
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2.5">
+              <Radio className="w-6 h-6 text-[#E50914] animate-pulse" />
+              <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+                TV en Vivo
+              </h2>
+            </div>
 
-      {loading ? (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 py-4">
-          {Array.from({ length: 18 }).map((_, i) => (
-            <div
-              key={i}
-              className="rounded-xl p-3 border border-white/[0.06] netflix-shimmer h-24"
+            {/* Selector Desplegable "Géneros de TV" con CustomSelect */}
+            <CustomSelect
+              icon={Layers}
+              options={TV_GENRE_OPTIONS}
+              value={selectedCategory}
+              onChange={setSelectedCategory}
+              label="Géneros y Regiones"
+              searchable={true}
             />
-          ))}
-        </div>
-      ) : (
-        <>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
-            {visibleChannels.map((channel) => {
-              const isActive = currentChannel?.url === channel.url;
-              const fav = isFavorite(channel);
-
-              return (
-                <div
-                  key={channel.url}
-                  onClick={() => handleSelectChannel(channel)}
-                  className={`group relative p-3 rounded-xl border transition-all duration-200 cursor-pointer flex flex-col justify-between h-24 ${
-                    isActive
-                      ? 'bg-neutral-900 border-[#E50914] ring-1 ring-[#E50914] shadow-lg shadow-red-950/40'
-                      : 'bg-[#151515] hover:bg-neutral-800/90 border-white/[0.07] hover:border-white/20'
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-2.5 overflow-hidden">
-                      <div className="w-9 h-9 rounded-lg overflow-hidden bg-black border border-white/10 flex items-center justify-center p-0.5 shrink-0">
-                        <img
-                          src={channel.logo}
-                          alt={channel.name}
-                          className="w-full h-full object-contain"
-                          loading="lazy"
-                          onError={(e) => {
-                            e.target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(
-                              channel.name
-                            )}&background=E50914&color=fff&size=128&bold=true`;
-                          }}
-                        />
-                      </div>
-                      <div className="overflow-hidden">
-                        <h4
-                          className={`text-xs font-bold truncate leading-tight ${
-                            isActive ? 'text-red-400 font-black' : 'text-neutral-100'
-                          }`}
-                        >
-                          {channel.name}
-                        </h4>
-                        <span className="text-[10px] text-neutral-500 truncate block mt-0.5">
-                          {channel.category}
-                        </span>
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={(e) => toggleFavorite(channel, e)}
-                      className={`p-1 rounded transition ${
-                        fav
-                          ? 'text-amber-400'
-                          : 'text-neutral-600 hover:text-amber-400 opacity-0 group-hover:opacity-100'
-                      }`}
-                    >
-                      <Star className={`w-3.5 h-3.5 ${fav ? 'fill-current' : ''}`} />
-                    </button>
-                  </div>
-
-                  <div className="flex items-center justify-between pt-1 border-t border-white/[0.05] text-[10px]">
-                    <span className="text-neutral-400 truncate">
-                      {channel.countryName || 'Global'}
-                    </span>
-                    {isActive ? (
-                      <span className="text-[#E50914] font-black">● EN VIVO</span>
-                    ) : (
-                      <span className="text-neutral-500 group-hover:text-neutral-300">
-                        Sintonizar ▶
-                      </span>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
           </div>
 
-          {filteredChannels.length > visibleLimit && (
-            <div className="pt-8 text-center">
-              <button
-                onClick={() => setVisibleLimit((prev) => prev + BATCH_INCREMENT)}
-                className="px-6 py-2.5 bg-neutral-900 hover:bg-neutral-800 text-white font-bold text-xs rounded-full border border-white/15 transition shadow-lg inline-flex items-center gap-2"
-              >
-                <span>Mostrar más canales (+{BATCH_INCREMENT})</span>
-                <ChevronDown className="w-4 h-4" />
-              </button>
+          <div className="flex items-center flex-wrap gap-2">
+            <div className="relative min-w-[210px] sm:w-64">
+              <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Buscar canal, deporte, país..."
+                className="w-full bg-black/80 border border-white/15 rounded-xl pl-9 pr-8 py-2 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-[#E50914] transition"
+              />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-white"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
+
+            <button
+              type="button"
+              onClick={() => setShowModal(true)}
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-[#181818] hover:bg-neutral-800 text-white text-xs font-bold rounded-xl border border-white/15 transition"
+            >
+              <PlusCircle className="w-4 h-4 text-emerald-400" />
+              <span className="hidden sm:inline">+ Lista M3U / Xtream</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => loadChannels(true)}
+              disabled={refreshing}
+              className="p-2 bg-[#181818] hover:bg-neutral-800 text-neutral-300 hover:text-white rounded-xl border border-white/15 transition"
+              title="Actualizar señales en vivo"
+            >
+              <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin text-[#E50914]' : ''}`} />
+            </button>
+          </div>
+        </div>
+
+        {/* Barra Rápida de Píldoras de Géneros de TV */}
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+          {TV_GENRE_OPTIONS.map((tab) => {
+            const isSelected = selectedCategory === tab.value;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setSelectedCategory(tab.value)}
+                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all duration-200 border ${
+                  isSelected
+                    ? 'bg-[#E50914] text-white border-red-400 shadow-lg shadow-red-950/50 scale-105'
+                    : 'bg-[#181818]/90 hover:bg-neutral-800 text-neutral-300 hover:text-white border-white/[0.08]'
+                }`}
+              >
+                <span>{tab.icon}</span>
+                <span>{tab.label}</span>
+                {tab.id === 'Favoritos' && favorites.length > 0 && (
+                  <span className="px-1.5 py-0.2 bg-amber-400/20 text-amber-300 text-[10px] rounded-full font-black">
+                    {favorites.length}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* 3. DISTRIBUCIÓN ORGANIZADA DE CANALES EN CARRUSELES 16:9 ESTILO NETFLIX */}
+      {!loading && selectedCategory === 'Todos' && !searchQuery.trim() ? (
+        <div className="space-y-1">
+          {netflixLiveRows.favList.length > 0 && (
+            <ChannelRowCarousel
+              title="⭐ Mi Lista de Canales en Vivo"
+              subtitle="Tus señales favoritas listas para sintonizar al instante"
+              channels={netflixLiveRows.favList}
+              currentChannel={currentChannel}
+              onSelectChannel={handleSelectChannel}
+              onToggleFavorite={toggleFavorite}
+              isFavorite={isFavorite}
+            />
           )}
-        </>
+
+          <ChannelRowCarousel
+            title="🔥 Canales Estrella Más Vistos Ahora"
+            subtitle="Las señales en directo más populares en alta definición"
+            channels={netflixLiveRows.featuredNow}
+            currentChannel={currentChannel}
+            onSelectChannel={handleSelectChannel}
+            onToggleFavorite={toggleFavorite}
+            isFavorite={isFavorite}
+          />
+
+          <ChannelRowCarousel
+            title="🍿 Cine & Series 24/7 (Maratones Continuos)"
+            subtitle="Películas de acción, suspenso, comedia y series las 24 horas"
+            channels={netflixLiveRows.movies247}
+            currentChannel={currentChannel}
+            onSelectChannel={handleSelectChannel}
+            onToggleFavorite={toggleFavorite}
+            isFavorite={isFavorite}
+          />
+
+          <ChannelRowCarousel
+            title="⚽ Deportes en Directo"
+            subtitle="Fútbol internacional, eventos en vivo y análisis deportivo"
+            channels={netflixLiveRows.sportsLive}
+            currentChannel={currentChannel}
+            onSelectChannel={handleSelectChannel}
+            onToggleFavorite={toggleFavorite}
+            isFavorite={isFavorite}
+          />
+
+          <ChannelRowCarousel
+            title="🇨🇴 Televisión de Colombia"
+            subtitle="Señales nacionales y regionales de Colombia en vivo"
+            channels={netflixLiveRows.colombiaTv}
+            currentChannel={currentChannel}
+            onSelectChannel={handleSelectChannel}
+            onToggleFavorite={toggleFavorite}
+            isFavorite={isFavorite}
+          />
+
+          <ChannelRowCarousel
+            title="🇲🇽 México, Argentina & Latinoamérica"
+            subtitle="Los canales líderes de entretenimiento de habla hispana"
+            channels={netflixLiveRows.mexicoLatam}
+            currentChannel={currentChannel}
+            onSelectChannel={handleSelectChannel}
+            onToggleFavorite={toggleFavorite}
+            isFavorite={isFavorite}
+          />
+
+          <ChannelRowCarousel
+            title="🎌 Anime 24/7, Gaming & Animación"
+            subtitle="Transmisiones continuas de anime, cartoons y cultura geek"
+            channels={netflixLiveRows.animeGaming}
+            currentChannel={currentChannel}
+            onSelectChannel={handleSelectChannel}
+            onToggleFavorite={toggleFavorite}
+            isFavorite={isFavorite}
+          />
+
+          <ChannelRowCarousel
+            title="📰 Noticias & Actualidad Internacional"
+            subtitle="Cobertura informativa global minuto a minuto"
+            channels={netflixLiveRows.newsGlobal}
+            currentChannel={currentChannel}
+            onSelectChannel={handleSelectChannel}
+            onToggleFavorite={toggleFavorite}
+            isFavorite={isFavorite}
+          />
+
+          <ChannelRowCarousel
+            title="🇪🇸 Televisión de España"
+            subtitle="Canales generalistas y temáticos de España"
+            channels={netflixLiveRows.spainTv}
+            currentChannel={currentChannel}
+            onSelectChannel={handleSelectChannel}
+            onToggleFavorite={toggleFavorite}
+            isFavorite={isFavorite}
+          />
+
+          <ChannelRowCarousel
+            title="🎵 Música, Conciertos & Variedades"
+            subtitle="Ritmos latinos, pop, rock y estilo de vida 24/7"
+            channels={netflixLiveRows.musicVariety}
+            currentChannel={currentChannel}
+            onSelectChannel={handleSelectChannel}
+            onToggleFavorite={toggleFavorite}
+            isFavorite={isFavorite}
+          />
+        </div>
+      ) : (
+        /* 4. Vista Filtrada por Género de TV o Búsqueda con Tarjetas Panorámicas 16:9 */
+        <div className="px-4 sm:px-8 lg:px-12 max-w-[1480px] mx-auto pt-2 animate-fadeIn">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h3 className="text-xl sm:text-2xl font-black text-white flex items-center gap-2.5">
+                <span className="w-1.5 h-6 bg-[#E50914] rounded-full inline-block shadow-[0_0_8px_#E50914]" />
+                <span>
+                  {searchQuery.trim()
+                    ? `Resultados en TV para "${searchQuery}"`
+                    : selectedGenreObj.label}
+                </span>
+              </h3>
+              <p className="text-xs text-neutral-400 mt-0.5 ml-4">
+                {selectedGenreObj.description || `${filteredChannels.length} señales disponibles`}
+              </p>
+            </div>
+
+            {selectedCategory !== 'Todos' && (
+              <button
+                onClick={() => setSelectedCategory('Todos')}
+                className="px-4 py-1.5 rounded-xl bg-white/10 hover:bg-[#E50914] text-xs font-extrabold text-white transition"
+              >
+                Volver a todas las filas
+              </button>
+            )}
+          </div>
+
+          {loading ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 py-4">
+              {Array.from({ length: 12 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="rounded-2xl aspect-video border border-white/[0.06] netflix-shimmer"
+                />
+              ))}
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                {visibleChannels.map((channel) => (
+                  <NetflixChannelCard
+                    key={channel.url}
+                    channel={channel}
+                    isActive={currentChannel?.url === channel.url}
+                    isFav={isFavorite(channel)}
+                    onSelect={handleSelectChannel}
+                    onToggleFavorite={toggleFavorite}
+                    isFixedWidth={false}
+                  />
+                ))}
+              </div>
+
+              {filteredChannels.length > visibleLimit && (
+                <div className="pt-8 text-center">
+                  <button
+                    onClick={() => setVisibleLimit((prev) => prev + BATCH_INCREMENT)}
+                    className="px-6 py-2.5 bg-neutral-900 hover:bg-neutral-800 text-white font-bold text-xs rounded-full border border-white/15 transition shadow-lg inline-flex items-center gap-2"
+                  >
+                    <span>Mostrar más canales (+{BATCH_INCREMENT})</span>
+                    <ChevronDown className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
       )}
 
       {/* Modal Agregar Lista M3U / Xtream */}

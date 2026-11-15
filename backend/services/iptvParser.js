@@ -1,3 +1,4 @@
+import { pipeline } from 'node:stream/promises';
 import axios from 'axios';
 
 // -------------------------------------------------------------
@@ -338,106 +339,52 @@ export async function getAggregatedChannels(options = {}) {
  * 3. Cabeceras Origin/Referer requeridas por CDNs de Pluto TV, Akamai y Cloudfront.
  */
 export async function proxyStream(streamUrl, req, res) {
+  const controller = new AbortController(); let upstream;
+  const stop = () => { controller.abort(); upstream?.destroy(); };
+  res.once('close', stop); req.once('aborted', stop);
   try {
-    const parsedTarget = new URL(streamUrl);
-    const originHeader = `${parsedTarget.protocol}//${parsedTarget.host}`;
-
-    // Detectar si es claramente un segmento binario (.ts, .m4s, .aac, .mp4, .cmfv, .cmfa, .key)
-    const pathnameLower = parsedTarget.pathname.toLowerCase();
-    const isBinarySegment = /\.(ts|m4s|mp4|aac|cmfv|cmfa|mp3|key|vtt)$/i.test(pathnameLower);
-
-    const response = await axios({
-      method: 'get',
-      url: streamUrl,
-      responseType: isBinarySegment ? 'stream' : 'arraybuffer',
-      timeout: 14000,
-      maxRedirects: 5,
-      headers: {
-        'User-Agent':
-          req.query.ua ||
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        Referer: req.query.ref || `${originHeader}/`,
-        Origin: originHeader,
-        Accept: '*/*',
-      },
+    const target = new URL(streamUrl);
+    if (!['http:', 'https:'].includes(target.protocol) || target.username || target.password) return res.status(400).json({ error: 'Se requiere una URL HTTP o HTTPS de medios' });
+    const response = await axios({ method: req.method === 'HEAD' ? 'head' : 'get', url: target.href, responseType: 'stream', timeout: 14000, maxRedirects: 5, signal: controller.signal,
+      validateStatus: status => status >= 200 && status < 300 || status === 416,
+      headers: { 'User-Agent': req.query.ua || 'StreamFlix/5.2', Referer: req.query.ref || target.origin + '/', Origin: target.origin, Accept: '*/*', 'Accept-Encoding': 'identity', ...(req.headers.range ? { Range: req.headers.range } : {}) },
     });
-
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', '*');
-    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-
-    const contentType = (response.headers['content-type'] || '').toLowerCase();
-
-    // Si se descargó como stream binario directo, hacer pipe inmediato
-    if (isBinarySegment) {
-      if (contentType) res.setHeader('Content-Type', contentType);
-      else if (pathnameLower.endsWith('.ts')) res.setHeader('Content-Type', 'video/mp2t');
-      else if (pathnameLower.endsWith('.m4s') || pathnameLower.endsWith('.mp4')) res.setHeader('Content-Type', 'video/iso.segment');
-
-      req.on('close', () => {
-        if (response.data && typeof response.data.destroy === 'function') {
-          response.data.destroy();
-        }
-      });
-      return response.data.pipe(res);
+    upstream = response.data;
+    res.setHeader('Cache-Control', 'no-store');
+    const contentType = response.headers['content-type'] || 'application/octet-stream';
+    if (response.status === 416 || req.method === 'HEAD') {
+      for (const header of ['content-type', 'content-length', 'content-range', 'accept-ranges']) if (response.headers[header]) res.setHeader(header, response.headers[header]);
+      upstream.destroy(); return res.status(response.status).end();
     }
-
-    // Convertir el buffer a texto para verificar si es un manifiesto #EXTM3U (incluso si la URL no terminaba en .m3u8)
-    const buffer = Buffer.from(response.data);
-    const firstBytes = buffer.subarray(0, 64).toString('utf8').trimStart();
-    const isManifest =
-      firstBytes.startsWith('#EXTM3U') ||
-      contentType.includes('mpegurl') ||
-      pathnameLower.endsWith('.m3u8') ||
-      pathnameLower.endsWith('.m3u');
-
+    const first = await new Promise((resolve, reject) => {
+      upstream.once('data', chunk => { upstream.pause(); resolve(chunk); });
+      upstream.once('end', () => resolve(Buffer.alloc(0))); upstream.once('error', reject);
+    });
+    const isManifest = /mpegurl/i.test(contentType) || first.subarray(0, 64).toString('utf8').trimStart().startsWith('#EXTM3U');
     if (isManifest) {
-      const manifestText = buffer.toString('utf8');
-      const finalUrl = response.request?.res?.responseUrl || streamUrl;
-      const baseUrlObj = new URL(finalUrl);
-
-      res.setHeader('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');
-
-      // Función auxiliar para resolver cualquier URI relativa o absoluta preservando tokens de sesión
-      const toProxiedUrl = (rawUri) => {
-        try {
-          const resolved = new URL(rawUri.trim(), baseUrlObj).href;
-          return `/api/iptv/proxy?url=${encodeURIComponent(resolved)}`;
-        } catch {
-          return rawUri;
-        }
+      let size = first.length; const chunks = [first];
+      for await (const chunk of upstream) { size += chunk.length; if (size > 2 * 1024 * 1024) throw new Error('Manifiesto demasiado grande'); chunks.push(chunk); }
+      if (size > 2 * 1024 * 1024) throw new Error('Manifiesto demasiado grande');
+      const finalUrl = response.request?.res?.responseUrl || target.href;
+      const proxied = value => {
+        const resolved = new URL(value.trim(), finalUrl); if (!['http:', 'https:'].includes(resolved.protocol)) throw new Error('URI no admitida');
+        const params = new URLSearchParams({ url: resolved.href });
+        if (req.query.ref) params.set('ref', req.query.ref); if (req.query.ua) params.set('ua', req.query.ua);
+        return '/api/iptv/proxy?' + params;
       };
-
-      // 1. Reescribir cualquier atributo URI="..." (en #EXT-X-MEDIA, #EXT-X-KEY, #EXT-X-MAP, #EXT-X-I-FRAME-STREAM-INF)
-      let rewritten = manifestText.replace(/URI="([^"]+)"/gi, (_, uri) => {
-        return `URI="${toProxiedUrl(uri)}"`;
-      });
-
-      // 2. Reescribir líneas de variantes y segmentos
-      const lines = rewritten.split(/\r?\n/);
-      const modifiedLines = lines.map((line) => {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith('#')) return line;
-        return toProxiedUrl(trimmed);
-      });
-
-      return res.send(modifiedLines.join('\n'));
+      const result = Buffer.concat(chunks).toString('utf8').split(/\r?\n/).map(line => !line.trim() ? line : line.startsWith('#') ? line.replace(/\bURI="([^"]+)"/g, (_, value) => 'URI="' + proxied(value) + '"') : proxied(line)).join('\n');
+      return res.type('application/vnd.apple.mpegurl').send(result);
     }
-
-    // Si no era manifiesto sino un segmento binario sin extensión estándar
-    if (contentType) {
-      res.setHeader('Content-Type', contentType);
-    } else {
-      res.setHeader('Content-Type', 'video/mp2t');
-    }
-    return res.send(buffer);
-  } catch (err) {
-    console.error(`[IPTV Proxy Error]:`, err.message);
-    if (!res.headersSent) {
-      res.status(502).json({ error: 'Error transmitiendo canal IPTV', details: err.message });
-    }
-  }
+    if (/text\/html|application\/(json|xhtml)/i.test(contentType)) throw new Error('El servidor devolvió una página de error en lugar de video');
+    res.status(response.status).type(contentType);
+    for (const header of ['content-length', 'content-range', 'accept-ranges']) if (response.headers[header]) res.setHeader(header, response.headers[header]);
+    res.write(first); await pipeline(upstream, res);
+  } catch (error) {
+    upstream?.destroy();
+    if (res.destroyed || req.aborted) return;
+    if (!res.headersSent) res.status([403, 404, 410, 429, 416].includes(error.response?.status) ? error.response.status : 502).json({ error: 'La fuente no respondió o no entregó un archivo multimedia' });
+    else res.destroy();
+  } finally { res.off('close', stop); req.off('aborted', stop); }
 }
 
 export const iptvService = {

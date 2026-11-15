@@ -1,3 +1,4 @@
+import { checkCloudHealth } from './services/cloudHealth.js';
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
@@ -8,6 +9,8 @@ import streamEngine from './services/streamEngine.js';
 import iptvService from './services/iptvParser.js';
 import subtitleService from './services/subtitleService.js';
 import externalPlayer from './services/externalPlayer.js';
+import fs from 'node:fs';
+import { aiAvailable, getAiJob, getAiVtt, publicAiJob, receiveUpload, startP2pJob, startUploadJob } from './services/aiSubtitles.js';
 
 dotenv.config();
 
@@ -16,7 +19,7 @@ const PORT = process.env.PORT || 4000;
 
 app.use(
   cors({
-    origin: '*',
+    origin: (origin, callback) => callback(null, !origin || /^http:\/\/(?:localhost|127\.0\.0\.1):(?:4000|5173)$/.test(origin)),
     methods: ['GET', 'POST', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Range', 'Authorization'],
     exposedHeaders: ['Content-Range', 'Accept-Ranges', 'Content-Length', 'Content-Type'],
@@ -24,6 +27,34 @@ app.use(
 );
 
 app.use(express.json());
+
+app.get('/api/ai/status', (_req, res) => res.json({ available: aiAvailable(), engine: 'Whisper local', privacy: 'El audio se procesa en este equipo.' }));
+app.post('/api/ai/subtitles/p2p', async (req, res) => {
+  try {
+    const job = await startP2pJob({ ...req.body, port: PORT });
+    res.status(202).json(publicAiJob(job));
+  } catch (error) { res.status(error.message.includes('Ya se está') ? 409 : 400).json({ error: error.message }); }
+});
+app.post('/api/ai/subtitles/upload', async (req, res) => {
+  if (req.headers['content-type'] !== 'application/octet-stream') return res.status(415).json({ error: 'Envía un archivo de audio o video.' });
+  if (Number(req.headers['content-length']) > 1024 ** 3) return res.status(413).json({ error: 'El archivo supera 1 GB.' });
+  try {
+    const file = await receiveUpload(req);
+    const job = startUploadJob(file, { language: req.query.language || 'auto', audioTrack: req.query.audioTrack || 0 });
+    res.status(202).json(publicAiJob(job));
+  } catch (error) { if (!res.headersSent && !res.destroyed) res.status(400).json({ error: error.message }); }
+});
+app.get('/api/ai/subtitles/:id', (req, res) => {
+  const job = getAiJob(req.params.id);
+  if (!job) return res.status(404).json({ error: 'Tarea no encontrada.' });
+  res.setHeader('Cache-Control', 'no-store'); res.json(publicAiJob(job));
+});
+app.get('/api/ai/subtitles/:id/vtt', (req, res) => {
+  const file = getAiVtt(req.params.id);
+  if (!file) return res.status(404).json({ error: 'Subtítulos aún no disponibles.' });
+  try { res.setHeader('Cache-Control', 'no-store'); res.type('text/vtt').send(fs.readFileSync(file, 'utf8')); }
+  catch { res.status(500).json({ error: 'No se pudo leer el VTT generado.' }); }
+});
 
 // -------------------------------------------------------------
 // RUTAS MÓDULO A: Catálogo, Explorador por Décadas/Géneros, Anime y Hubs TMDB
@@ -87,6 +118,7 @@ app.get('/api/tmdb/discover', async (req, res) => {
       genre = null,
       decade = null,
       network = null,
+      originalLanguage = null,
       sortBy = 'popularity.desc',
       page = 1,
       lang = 'es-MX',
@@ -97,6 +129,7 @@ app.get('/api/tmdb/discover', async (req, res) => {
       genre,
       decade,
       network,
+      originalLanguage,
       sortBy,
       page: Number(page),
       language: lang,
@@ -107,7 +140,7 @@ app.get('/api/tmdb/discover', async (req, res) => {
   }
 });
 
-// Secciones curadas de Películas
+// Secciones curadas de Películas (incluye taquilla, géneros y clásicos 80s/90s integrados pasivamente)
 app.get('/api/tmdb/movie-sections', async (req, res) => {
   try {
     const { lang = 'es-MX' } = req.query;
@@ -118,7 +151,7 @@ app.get('/api/tmdb/movie-sections', async (req, res) => {
   }
 });
 
-// Secciones curadas de Series (incluye Clásicos de los 90s y 80s)
+// Secciones curadas de Series (incluye K-Dramas, sitcoms y clásicos 80s/90s integrados pasivamente)
 app.get('/api/tmdb/series-sections', async (req, res) => {
   try {
     const { lang = 'es-MX' } = req.query;
@@ -126,6 +159,17 @@ app.get('/api/tmdb/series-sections', async (req, res) => {
     res.json(sections);
   } catch (err) {
     res.status(500).json({ error: 'Error obteniendo secciones de series', message: err.message });
+  }
+});
+
+// Secciones curadas de Anime (7 carruseles dedicados: Top 10, Shonen, Isekai, Seinen, Romance, Películas y Clásicos 80s/90s)
+app.get('/api/tmdb/anime-sections', async (req, res) => {
+  try {
+    const { lang = 'es-MX' } = req.query;
+    const sections = await tmdbService.getAnimeSections(lang);
+    res.json(sections);
+  } catch (err) {
+    res.status(500).json({ error: 'Error obteniendo secciones de anime', message: err.message });
   }
 });
 
@@ -202,8 +246,15 @@ app.get('/api/catalog/:type/:tmdbId/videos', async (req, res) => {
 });
 
 // -------------------------------------------------------------
-// RUTAS MÓDULO B: Motor Híbrido Universal de Video (TMDB + IMDb Dual Index)
+// RUTAS MÓDULO B: Motor Híbrido Universal de Video (TMDB + IMDb + YTS MP4/AAC)
 // -------------------------------------------------------------
+
+app.get('/api/cloud/health', async (req, res) => {
+  const { tmdbId, imdbId, type = 'movie', season = 1, episode = 1, serverId } = req.query;
+  if (!/^\d+$/.test(String(tmdbId || '')) || !['movie', 'tv', 'series'].includes(type) || !/^\d+$/.test(String(season)) || Number(season) < 1 || !/^\d+$/.test(String(episode)) || Number(episode) < 1) return res.status(400).json({ error: 'Identificador o episodio inválido' });
+  res.setHeader('Cache-Control', 'no-store');
+  res.json(await checkCloudHealth({ tmdbId, imdbId, isSeries: type !== 'movie', season: Number(season), episode: Number(episode), serverId }));
+});
 
 app.get('/api/resolve', async (req, res) => {
   try {
@@ -247,7 +298,7 @@ app.get('/api/resolve', async (req, res) => {
 });
 
 // -------------------------------------------------------------
-// RUTAS P2P: Servidor de Streaming WebTorrent con HTTP Range 206 + FFmpeg
+// RUTAS P2P: Servidor de Streaming WebTorrent con HTTP Range 206 + FFmpeg AAC Live Remux
 // -------------------------------------------------------------
 
 app.get('/api/stream/:infoHash', async (req, res) => {
@@ -260,7 +311,7 @@ app.get('/api/stream/:infoHash', async (req, res) => {
 
 app.get('/api/stream/:infoHash/status', (req, res) => {
   const { infoHash } = req.params;
-  const status = streamEngine.getStatus(infoHash);
+  const status = streamEngine.getStatus(infoHash, { fileIdx: req.query.fileIdx, season: req.query.s, episode: req.query.e });
   res.json(status);
 });
 
@@ -294,30 +345,11 @@ app.get('/api/subtitles/:type/:imdbId', async (req, res) => {
 });
 
 app.get('/api/subtitles/vtt', async (req, res) => {
-  const { url } = req.query;
-  if (!url) {
-    return res.status(400).send('WEBVTT\n\nURL no proporcionada');
-  }
-
+  if (typeof req.query.id !== 'string') return res.status(400).json({ error: 'Identificador de subtítulos requerido' });
   try {
-    const srtRes = await axios.get(url, {
-      responseType: 'text',
-      timeout: 9000,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-      },
-    });
-
-    const vttContent = subtitleService.convertSrtToVtt(srtRes.data);
-
-    res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.send(vttContent);
-  } catch (err) {
-    console.error('[VTT Conversion Error]:', err.message);
-    res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
-    res.send('WEBVTT\n\n1\n00:00:01.000 --> 00:00:04.000\nSubtítulo no disponible');
-  }
+    const content = await subtitleService.fetchSubtitle(req.query.id);
+    res.setHeader('Cache-Control', 'no-store'); res.type('text/vtt').send(content);
+  } catch (error) { res.status(error.status || 502).json({ error: error.message || 'No se pudo cargar el subtítulo' }); }
 });
 
 app.post('/api/player/launch', (req, res) => {
@@ -445,8 +477,9 @@ app.get('/api/iptv/proxy', async (req, res) => {
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'online',
-    version: '4.0.0',
-    platform: 'StreamFlix Pro v4.0 — Masterpiece Edition ($0 Cost)',
+    version: '5.3.0',
+    capabilities: { ffmpeg: streamEngine.getStatus('').hasFfmpeg, cloudDiagnostics: true, aiSubtitles: aiAvailable() },
+    platform: 'StreamFlix Pro v5.2 — Netflix Ultra Edition ($0 Cost)',
     timestamp: new Date().toISOString(),
   });
 });
@@ -460,9 +493,9 @@ process.on('unhandledRejection', (reason) => {
   console.error('[Middleware Unhandled Rejection]:', reason);
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, '127.0.0.1', () => {
   console.log(`=======================================================`);
-  console.log(`🚀 StreamFlix Pro v4.0 activo en: http://localhost:${PORT}`);
-  console.log(`🎬 Catálogo Clásico (70s-2026), 18 Espejos Cloud & P2P listos`);
+  console.log(`🚀 StreamFlix Pro v5.3 activo en: http://localhost:${PORT}`);
+  console.log(`🎬 Diagnóstico Cloud, reproducción directa y conversión de audio disponibles`);
   console.log(`=======================================================`);
 });

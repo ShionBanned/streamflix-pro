@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import api from '../services/api.js';
+import CustomSelect from './CustomSelect.jsx';
 import {
   X,
   Play,
@@ -14,7 +15,6 @@ import {
   Users,
   Film,
   Sparkles,
-  Volume2,
   RotateCcw,
 } from 'lucide-react';
 import { LANGUAGE_OPTIONS } from '../hooks/useUserMedia.js';
@@ -189,6 +189,15 @@ export default function DetailModal({
   const currentLangObj =
     LANGUAGE_OPTIONS.find((l) => l.id === selectedLang) || LANGUAGE_OPTIONS[0];
 
+  const seasonSelectOptions = useMemo(() => {
+    return Array.from({ length: seasonsCount }, (_, i) => ({
+      value: i + 1,
+      label: `Temporada ${i + 1}`,
+      icon: '📺',
+      badge: i + 1 === Number(selectedSeason) ? 'ACTIVA' : null,
+    }));
+  }, [seasonsCount, selectedSeason]);
+
   const filteredEpisodes = useMemo(() => {
     if (!episodeFilter.trim()) return seasonEpisodes;
     const q = episodeFilter.toLowerCase().trim();
@@ -265,7 +274,6 @@ export default function DetailModal({
             </h2>
 
             <div className="flex flex-wrap items-center gap-2.5">
-              {/* Botón Principal: Si tiene progreso guardado en Continuar Viendo, permite Reanudar en el segundo exacto */}
               <button
                 onClick={() =>
                   onPlay(
@@ -287,12 +295,11 @@ export default function DetailModal({
                         )})`
                       : `Reanudar en ${formatMinsSec(savedEntry.currentTime)}`
                     : isTv
-                    ? `Reproducir T${selectedSeason}:E1 (${currentLangObj.flag} ${currentLangObj.shortLabel})`
-                    : `Reproducir (${currentLangObj.flag} ${currentLangObj.shortLabel})`}
+                    ? `Reproducir T${selectedSeason}:E1 · ${currentLangObj.flag} ${currentLangObj.shortLabel}`
+                    : `Reproducir · ${currentLangObj.flag} ${currentLangObj.shortLabel}`}
                 </span>
               </button>
 
-              {/* Si hay progreso guardado, ofrecer también "Desde el inicio (00:00)" */}
               {savedEntry && savedEntry.currentTime > 10 && (
                 <button
                   onClick={() =>
@@ -344,7 +351,7 @@ export default function DetailModal({
             <div className="flex items-center gap-2">
               <Globe className="w-4 h-4 text-[#E50914]" />
               <span className="text-xs font-extrabold uppercase tracking-wider text-neutral-300">
-                Selector de Idioma (Audio y Subtítulos):
+                Motor de Audio Pre-Preparado (Idioma y Subtítulos):
               </span>
             </div>
 
@@ -378,7 +385,7 @@ export default function DetailModal({
                 <span className="text-emerald-400 font-extrabold">{matchScore}% para ti</span>
                 <span className="text-neutral-300 font-semibold">{releaseYear}</span>
                 <span className="px-1.5 py-0.5 border border-neutral-500 rounded text-neutral-200 text-[10px] font-bold">
-                  4K ULTRA HD
+                  Calidad y audio según la fuente
                 </span>
                 {runtime && (
                   <span className="flex items-center gap-1 text-neutral-300">
@@ -427,7 +434,7 @@ export default function DetailModal({
               <div>
                 <span className="text-neutral-500 block">Motores disponibles:</span>
                 <span className="text-emerald-400 font-semibold">
-                  6 Servidores Cloud (18 Espejos) + P2P
+                  8 Familias Cloud (24+ Espejos) + YTS MP4/AAC + P2P
                 </span>
               </div>
             </div>
@@ -500,25 +507,18 @@ export default function DetailModal({
                     value={episodeFilter}
                     onChange={(e) => setEpisodeFilter(e.target.value)}
                     placeholder="Filtrar episodio..."
-                    className="w-full bg-neutral-900 border border-neutral-700 rounded-lg pl-9 pr-3 py-2 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-[#E50914]"
+                    className="w-full bg-neutral-900 border border-neutral-700 rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-[#E50914]"
                   />
                 </div>
 
                 {seasonsCount > 1 && (
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-neutral-400 font-semibold">Temporada:</span>
-                    <select
-                      value={selectedSeason}
-                      onChange={(e) => setSelectedSeason(Number(e.target.value))}
-                      className="bg-neutral-800 text-white border border-neutral-700 rounded-lg px-3.5 py-2 text-xs font-extrabold focus:outline-none focus:border-[#E50914] cursor-pointer"
-                    >
-                      {Array.from({ length: seasonsCount }, (_, i) => i + 1).map((s) => (
-                        <option key={s} value={s}>
-                          Temporada {s}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                  <CustomSelect
+                    options={seasonSelectOptions}
+                    value={selectedSeason}
+                    onChange={(val) => setSelectedSeason(Number(val))}
+                    align="right"
+                    size="md"
+                  />
                 )}
               </div>
 

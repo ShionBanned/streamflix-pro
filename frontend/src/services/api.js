@@ -1,11 +1,11 @@
 import axios from 'axios';
 
 const BASE_URL = '/api';
-const DIRECT_BACKEND_URL = 'http://localhost:4000/api';
+const DIRECT_BACKEND_URL = 'http://127.0.0.1:4000/api';
 
 const apiClient = axios.create({
   baseURL: BASE_URL,
-  timeout: 10000,
+  timeout: 12000,
 });
 
 // Caché en memoria del cliente (Frontend) para transiciones de pestaña en 0ms
@@ -39,6 +39,36 @@ async function cachedGet(url, params = {}) {
   const res = await apiClient.get(url, { params });
   clientCache.set(key, { data: res.data, time: now });
   return res.data;
+}
+
+/**
+ * Mezcla de forma pasiva y orgánica títulos icónicos de distintas décadas dentro del mismo género
+ */
+function blendPassiveItems(primary = [], secondary = []) {
+  const seen = new Set();
+  const out = [];
+  const max = Math.max(primary.length, secondary.length);
+  for (let i = 0; i < max; i++) {
+    if (primary[i]?.id && !seen.has(primary[i].id)) {
+      seen.add(primary[i].id);
+      out.push(primary[i]);
+    }
+    if (i % 4 === 3 && secondary[Math.floor(i / 4)]?.id) {
+      const s = secondary[Math.floor(i / 4)];
+      if (!seen.has(s.id)) {
+        seen.add(s.id);
+        out.push(s);
+      }
+    }
+  }
+  for (const s of secondary) {
+    if (out.length >= 24) break;
+    if (s?.id && !seen.has(s.id)) {
+      seen.add(s.id);
+      out.push(s);
+    }
+  }
+  return out;
 }
 
 export const api = {
@@ -92,11 +122,17 @@ export const api = {
     }
   },
 
+  /**
+   * Explorador universal con respaldo inteligente en cliente:
+   * Garantiza que cualquier género de Películas, Series o Anime devuelva siempre resultados,
+   * mezclando pasivamente títulos actuales con clásicos icónicos del mismo género.
+   */
   async discoverCatalog({
     type = 'movie',
     genre = 'all',
     decade = 'all',
     network = 'all',
+    originalLanguage = null,
     sortBy = 'popularity.desc',
     page = 1,
     lang = 'es-MX',
@@ -106,8 +142,59 @@ export const api = {
       if (genre && genre !== 'all') params.genre = genre;
       if (decade && decade !== 'all') params.decade = decade;
       if (network && network !== 'all') params.network = network;
-      const data = await cachedGet('/tmdb/discover', params);
-      return data?.results || [];
+      if (originalLanguage) params.originalLanguage = originalLanguage;
+
+      const [mainRes, iconicRes] = await Promise.allSettled([
+        cachedGet('/tmdb/discover', params),
+        sortBy === 'popularity.desc' && (!decade || decade === 'all')
+          ? cachedGet('/tmdb/discover', { ...params, sortBy: 'vote_count.desc' })
+          : Promise.resolve({ results: [] }),
+      ]);
+
+      let primaryList =
+        mainRes.status === 'fulfilled' ? mainRes.value?.results || [] : [];
+      const iconicList =
+        iconicRes.status === 'fulfilled' ? iconicRes.value?.results || [] : [];
+
+      let combined = blendPassiveItems(primaryList, iconicList);
+
+      // Si es una subcategoría de Anime y el backend antiguo ignoró originalLanguage='ja',
+      // filtrar y complementar con el catálogo de Anime de páginas 1 y 2
+      if (originalLanguage === 'ja' || (combined.length === 0 && String(genre).includes('16'))) {
+        const [aniP1, aniP2] = await Promise.allSettled([
+          this.getAnime(1, lang),
+          this.getAnime(2, lang),
+        ]);
+        const animePool = [
+          ...(aniP1.status === 'fulfilled' ? aniP1.value : []),
+          ...(aniP2.status === 'fulfilled' ? aniP2.value : []),
+        ];
+
+        const subGenreIds = String(genre)
+          .split(/[,|]/)
+          .map((g) => Number(g.trim()))
+          .filter((n) => !isNaN(n) && n !== 16);
+
+        const filteredPool =
+          subGenreIds.length > 0
+            ? animePool.filter(
+                (item) =>
+                  Array.isArray(item.genre_ids) &&
+                  item.genre_ids.some((id) => subGenreIds.includes(Number(id)))
+              )
+            : animePool;
+
+        const japaneseCombined = combined.filter(
+          (item) => !item.original_language || item.original_language === 'ja'
+        );
+
+        combined = blendPassiveItems(
+          japaneseCombined.length >= 6 ? japaneseCombined : filteredPool,
+          animePool
+        );
+      }
+
+      return combined;
     } catch (e) {
       console.warn('Error en discoverCatalog:', e.message);
       return [];
@@ -115,21 +202,165 @@ export const api = {
   },
 
   async getMovieSections(lang = 'es-MX') {
+    let base = {};
     try {
-      return (await cachedGet('/tmdb/movie-sections', { lang })) || {};
-    } catch (e) {
-      console.warn('Error en getMovieSections:', e.message);
-      return {};
+      base = (await cachedGet('/tmdb/movie-sections', { lang })) || {};
+    } catch {
+      base = {};
     }
+
+    // Garantizar que todas las filas de géneros de películas estén pobladas (con clásicos integrados pasivamente)
+    const [
+      actionFallback,
+      scifiFallback,
+      thrillerFallback,
+      horrorFallback,
+      comedyFallback,
+      romanceFallback,
+      animationFallback,
+    ] = await Promise.all([
+      base.action?.length >= 6
+        ? Promise.resolve(base.action)
+        : this.discoverCatalog({ type: 'movie', genre: '28', lang }),
+      base.scifi?.length >= 6
+        ? Promise.resolve(base.scifi)
+        : this.discoverCatalog({ type: 'movie', genre: '878', lang }),
+      base.thrillerMystery?.length >= 6
+        ? Promise.resolve(base.thrillerMystery)
+        : this.discoverCatalog({ type: 'movie', genre: '53', lang }),
+      base.horror?.length >= 6
+        ? Promise.resolve(base.horror)
+        : this.discoverCatalog({ type: 'movie', genre: '27', lang }),
+      base.comedy?.length >= 6
+        ? Promise.resolve(base.comedy)
+        : this.discoverCatalog({ type: 'movie', genre: '35', lang }),
+      base.romanceDrama?.length >= 6
+        ? Promise.resolve(base.romanceDrama)
+        : this.discoverCatalog({ type: 'movie', genre: '10749', lang }),
+      base.animation?.length >= 6
+        ? Promise.resolve(base.animation)
+        : this.discoverCatalog({ type: 'movie', genre: '16', lang }),
+    ]);
+
+    return {
+      ...base,
+      action: blendPassiveItems(actionFallback, base.classics90s || []),
+      scifi: scifiFallback,
+      thrillerMystery: thrillerFallback,
+      horror: horrorFallback,
+      comedy: comedyFallback,
+      romanceDrama: romanceFallback,
+      animation: animationFallback,
+    };
   },
 
   async getSeriesSections(lang = 'es-MX') {
+    let base = {};
     try {
-      return (await cachedGet('/tmdb/series-sections', { lang })) || {};
-    } catch (e) {
-      console.warn('Error en getSeriesSections:', e.message);
-      return {};
+      base = (await cachedGet('/tmdb/series-sections', { lang })) || {};
+    } catch {
+      base = {};
     }
+
+    const [
+      actionAdv,
+      scifiFan,
+      crimeMys,
+      sitcomsRow,
+      dramaRow,
+      cartoonsRow,
+    ] = await Promise.all([
+      base.actionAdventure?.length >= 6
+        ? Promise.resolve(base.actionAdventure)
+        : this.discoverCatalog({ type: 'tv', genre: '10759', lang }),
+      base.scifiFantasy?.length >= 6
+        ? Promise.resolve(base.scifiFantasy)
+        : this.discoverCatalog({ type: 'tv', genre: '10765', lang }),
+      base.crimeMystery?.length >= 6
+        ? Promise.resolve(base.crimeMystery)
+        : this.discoverCatalog({ type: 'tv', genre: '80', lang }),
+      base.sitcoms?.length >= 6
+        ? Promise.resolve(base.sitcoms)
+        : this.discoverCatalog({ type: 'tv', genre: '35', lang }),
+      base.drama?.length >= 6
+        ? Promise.resolve(base.drama)
+        : this.discoverCatalog({ type: 'tv', genre: '18', lang }),
+      base.cartoons?.length >= 6
+        ? Promise.resolve(base.cartoons)
+        : this.discoverCatalog({ type: 'tv', genre: '16', lang }),
+    ]);
+
+    return {
+      ...base,
+      topRated: blendPassiveItems(base.topRated || [], base.classics90s || []),
+      actionAdventure: actionAdv,
+      scifiFantasy: scifiFan,
+      crimeMystery: crimeMys,
+      sitcoms: blendPassiveItems(sitcomsRow, base.classics90s || []),
+      drama: dramaRow,
+      cartoons: blendPassiveItems(cartoonsRow, base.retro80s || []),
+    };
+  },
+
+  /**
+   * Obtiene todas las secciones de Anime garantizando carga 100% incluso si el backend no fue reiniciado.
+   */
+  async getAnimeSections(lang = 'es-MX') {
+    let base = {};
+    try {
+      base = (await cachedGet('/tmdb/anime-sections', { lang })) || {};
+    } catch {
+      base = {};
+    }
+
+    const [page1, page2, page3] = await Promise.all([
+      this.getAnime(1, lang),
+      this.getAnime(2, lang),
+      this.getAnime(3, lang),
+    ]);
+
+    const fullAnimePool = blendPassiveItems([...page1, ...page2], page3);
+
+    const filterByGenre = (gIds, fallbackSliceStart = 0) => {
+      const matched = fullAnimePool.filter(
+        (item) =>
+          Array.isArray(item.genre_ids) &&
+          item.genre_ids.some((id) => gIds.includes(Number(id)))
+      );
+      if (matched.length >= 8) return matched;
+      return blendPassiveItems(
+        matched,
+        fullAnimePool.slice(fallbackSliceStart, fallbackSliceStart + 16)
+      );
+    };
+
+    const animeMoviesList = fullAnimePool.filter((i) => i.media_type === 'movie');
+
+    return {
+      trending: base.trending?.length >= 6 ? base.trending : fullAnimePool.slice(0, 18),
+      shonenAction:
+        base.shonenAction?.length >= 6
+          ? base.shonenAction
+          : filterByGenre([10759, 28, 12], 0),
+      fantasyIsekai:
+        base.fantasyIsekai?.length >= 6
+          ? base.fantasyIsekai
+          : filterByGenre([10765, 14, 878], 6),
+      seinenMystery:
+        base.seinenMystery?.length >= 6
+          ? base.seinenMystery
+          : filterByGenre([9648, 80, 18, 53], 12),
+      romanceSlice:
+        base.romanceSlice?.length >= 6
+          ? base.romanceSlice
+          : filterByGenre([35, 10749], 16),
+      animeMovies:
+        base.animeMovies?.length >= 6
+          ? base.animeMovies
+          : animeMoviesList.length >= 4
+          ? animeMoviesList
+          : fullAnimePool.slice(8, 24),
+    };
   },
 
   async searchMulti(query, page = 1, lang = 'es-MX') {
@@ -204,9 +435,6 @@ export const api = {
     return await cachedGet('/resolve', params);
   },
 
-  /**
-   * Pre-carga silenciosa al pasar el ratón sobre una tarjeta para que abrir el modal o reproducir tome 0ms
-   */
   prefetchTitle(item, lang = 'es-MX') {
     if (!item || !item.id) return;
     const isTv =

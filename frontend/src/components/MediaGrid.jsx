@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import api from '../services/api.js';
 import {
   Star,
@@ -31,14 +31,17 @@ export default function MediaGrid({
   preferredLanguage = 'latino',
 }) {
   const scrollRef = useRef(null);
+  const [isScrollingAnim, setIsScrollingAnim] = useState(false);
 
   const currentLang =
     LANGUAGE_OPTIONS.find((l) => l.id === preferredLanguage) || LANGUAGE_OPTIONS[0];
 
   const scroll = (direction) => {
     if (scrollRef.current) {
-      const scrollAmount = direction === 'left' ? -720 : 720;
+      setIsScrollingAnim(true);
+      const scrollAmount = direction === 'left' ? -780 : 780;
       scrollRef.current.scrollBy({ left: scrollAmount, behavior: 'smooth' });
+      setTimeout(() => setIsScrollingAnim(false), 420);
     }
   };
 
@@ -70,10 +73,11 @@ export default function MediaGrid({
     );
   }
 
+  // Si es una fila horizontal secundaria vacía, ocultarla limpiamente sin mostrar cajas de error
   if (!items || items.length === 0) {
-    if (isContinueWatching) return null;
+    if (isContinueWatching || isRow || isTop10) return null;
     return (
-      <div className="py-6 px-4 sm:px-8 lg:px-12 max-w-[1480px] mx-auto text-center">
+      <div className="py-6 px-4 sm:px-8 lg:px-12 max-w-[1480px] mx-auto text-center animate-fadeIn">
         {title && (
           <h2 className="text-xl sm:text-2xl font-extrabold text-white tracking-tight flex items-center gap-2.5 mb-4">
             <span className="w-1.5 h-6 bg-[#E50914] rounded-full inline-block" />
@@ -107,7 +111,7 @@ export default function MediaGrid({
   };
 
   return (
-    <div className="relative group/row py-3.5 px-4 sm:px-8 lg:px-12 max-w-[1480px] mx-auto">
+    <div className="relative group/row py-3.5 px-4 sm:px-8 lg:px-12 max-w-[1480px] mx-auto animate-rowReveal">
       {title && (
         <div className="flex items-end justify-between mb-3">
           <div>
@@ -129,13 +133,13 @@ export default function MediaGrid({
         <>
           <button
             onClick={() => scroll('left')}
-            className="hidden md:flex absolute left-1 top-1/2 z-30 w-11 h-28 -translate-y-1/2 bg-black/75 hover:bg-black/95 text-white rounded-r-xl items-center justify-center opacity-0 group-hover/row:opacity-100 transition-all duration-200 hover:scale-105 border-y border-r border-white/15 backdrop-blur-md shadow-2xl"
+            className="hidden md:flex absolute left-1 top-1/2 z-30 w-11 h-32 -translate-y-1/2 bg-black/80 hover:bg-[#E50914] text-white rounded-r-2xl items-center justify-center opacity-0 group-hover/row:opacity-100 transition-all duration-300 hover:scale-105 border-y border-r border-white/15 backdrop-blur-md shadow-2xl"
           >
             <ChevronLeft className="w-7 h-7" />
           </button>
           <button
             onClick={() => scroll('right')}
-            className="hidden md:flex absolute right-1 top-1/2 z-30 w-11 h-28 -translate-y-1/2 bg-black/75 hover:bg-black/95 text-white rounded-l-xl items-center justify-center opacity-0 group-hover/row:opacity-100 transition-all duration-200 hover:scale-105 border-y border-l border-white/15 backdrop-blur-md shadow-2xl"
+            className="hidden md:flex absolute right-1 top-1/2 z-30 w-11 h-32 -translate-y-1/2 bg-black/80 hover:bg-[#E50914] text-white rounded-l-2xl items-center justify-center opacity-0 group-hover/row:opacity-100 transition-all duration-300 hover:scale-105 border-y border-l border-white/15 backdrop-blur-md shadow-2xl"
           >
             <ChevronRight className="w-7 h-7" />
           </button>
@@ -144,17 +148,17 @@ export default function MediaGrid({
 
       <div
         ref={scrollRef}
-        className={
+        className={`${
           isRow || isContinueWatching || isTop10
             ? 'flex gap-4 overflow-x-auto no-scrollbar pb-5 pt-2 -mx-4 px-4 sm:-mx-8 sm:px-8 scroll-smooth'
             : 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-5'
-        }
+        } transition-transform duration-300 ${isScrollingAnim ? 'scale-[0.995]' : 'scale-100'}`}
       >
         {displayItems.map((item, index) => {
           const itemId = item.id || item.tmdbId;
           const itemTitle = item.title || item.name || 'Sin título';
           const releaseYear = (item.release_date || item.first_air_date || '').substring(0, 4);
-          const rating = item.vote_average ? item.vote_average.toFixed(1) : '8.2';
+          const rating = item.vote_average ? Number(item.vote_average).toFixed(1) : '8.2';
           const matchScore = Math.min(99, Math.max(85, Math.round(Number(rating) * 10 + 8)));
           const isTv =
             item.type === 'tv' ||
@@ -164,7 +168,7 @@ export default function MediaGrid({
 
           const savedEntry = getSavedEntry ? getSavedEntry(itemId) : null;
 
-          // 1. Tarjeta "Continuar Viendo" (16:9 con reanudación exacta en el segundo guardado)
+          // 1. Tarjeta "Continuar Viendo" (16:9)
           if (isContinueWatching) {
             const backdropImg =
               item.backdrop_url ||
@@ -343,7 +347,7 @@ export default function MediaGrid({
           // 3. Tarjeta Estándar de Catálogo con Pre-Carga en Hover
           return (
             <div
-              key={`${itemId}-${itemTitle}`}
+              key={`${itemId}-${index}`}
               onMouseEnter={() => api.prefetchTitle(item, currentLang.tmdbLang)}
               className={`group relative flex-shrink-0 cursor-pointer rounded-xl overflow-hidden bg-[#161616] border border-white/[0.07] netflix-card-transition ${
                 isRow ? 'w-40 sm:w-48' : 'w-full'
@@ -375,7 +379,6 @@ export default function MediaGrid({
                   </span>
                 </div>
 
-                {/* Barra de Progreso si ya empezó a ver este título */}
                 {savedEntry && (
                   <div className="absolute bottom-0 left-0 right-0 h-1 bg-neutral-800 z-20">
                     <div
@@ -402,7 +405,7 @@ export default function MediaGrid({
                       title={
                         savedEntry
                           ? `Reanudar en ${formatMinsSec(savedEntry.currentTime)}`
-                          : `Reproducir en ${currentLang.label}`
+                          : `Reproducir · ${currentLang.label}`
                       }
                     >
                       <Play className="w-4 h-4 fill-current ml-0.5" />
@@ -446,7 +449,7 @@ export default function MediaGrid({
                     </span>
                     <span className="text-neutral-500">•</span>
                     <span className="px-1 border border-white/25 rounded text-[9px] text-neutral-200 font-bold">
-                      HD
+                      Fuente
                     </span>
                     <span className="text-neutral-300">{currentLang.flag}</span>
                   </div>
@@ -458,7 +461,7 @@ export default function MediaGrid({
                   {itemTitle}
                 </h3>
                 <div className="flex items-center justify-between text-[11px] text-neutral-400 mt-1">
-                  <span>{releaseYear || 'Estreno'}</span>
+                  <span>{releaseYear || 'Destacado'}</span>
                   <span className="text-[10px] text-neutral-300 font-medium flex items-center gap-1">
                     <span>{currentLang.flag}</span>
                     <span>{currentLang.shortLabel}</span>
