@@ -26,11 +26,65 @@ export async function fetchSubtitle(id) {
   return toWebVtt(response.data);
 }
 
+const STOP_TOKENS = new Set(['1080p', '720p', '2160p', '4k', 'x264', 'x265', 'h264', 'h265', 'hevc', 'av1', 'aac', 'ac3', 'eac3', 'dts', 'ddp', 'ddp5', 'atmos', '10bit', 'hdr', 'dv', 'sdr', 'mkv', 'mp4', 'avi', 'srt', 'vtt', 'latino', 'spanish', 'english', 'esp', 'eng', 'sub', 'subs']);
+
+function tokenizeRelease(value = '') {
+  return String(value)
+    .toLowerCase()
+    .replace(/\.[a-z0-9]{2,4}$/i, '')
+    .split(/[^a-z0-9]+/)
+    .filter(token => token.length >= 2);
+}
+
+function extractSourceType(tokens) {
+  const joined = tokens.join(' ');
+  if (/\b(?:web\s*dl|webdl)\b/.test(joined)) return 'web-dl';
+  if (/\b(?:web\s*rip|webrip|web)\b/.test(joined)) return 'webrip';
+  if (/\b(?:blu\s*ray|bluray|bdrip|brrip|remux)\b/.test(joined)) return 'bluray';
+  if (/\b(?:hdtv|pdtv)\b/.test(joined)) return 'hdtv';
+  if (/\b(?:hdrip|dvdrip)\b/.test(joined)) return 'hdrip';
+  return null;
+}
+
+export function scoreSubtitleRelease(subRelease = '', targetRelease = '') {
+  if (!targetRelease || !subRelease) return 0;
+  const targetTokens = tokenizeRelease(targetRelease);
+  const subTokens = tokenizeRelease(subRelease);
+  if (!targetTokens.length || !subTokens.length) return 0;
+
+  let score = 0;
+  const subSet = new Set(subTokens);
+  const targetSource = extractSourceType(targetTokens);
+  const subSource = extractSourceType(subTokens);
+  if (targetSource && subSource) {
+    score += targetSource === subSource ? 30 : -10;
+  }
+
+  // Último token suele ser el release group (e.g. SPARKS, YTS, NTb, FLUX)
+  const targetGroup = targetTokens[targetTokens.length - 1];
+  const subGroup = subTokens[subTokens.length - 1];
+  if (targetGroup && !STOP_TOKENS.has(targetGroup) && targetGroup.length >= 3) {
+    if (subGroup === targetGroup) score += 50;
+    else if (subSet.has(targetGroup)) score += 35;
+  }
+
+  for (const token of targetTokens) {
+    if (STOP_TOKENS.has(token)) {
+      if (subSet.has(token)) score += 6;
+    } else if (token.length >= 3 && subSet.has(token)) {
+      score += 12;
+    }
+  }
+
+  if (/\b(?:hi|sdh|hearing)\b/i.test(subRelease)) score -= 3;
+  return score;
+}
+
 /**
  * Consulta el endpoint público de subtítulos v3 compatible con Stremio (Zero-API-Key)
- * Soporta Español Latino, Español Castellano e Inglés CC
+ * Soporta Español Latino, Español Castellano e Inglés CC con puntuación por release
  */
-export async function getSubtitles(type, imdbId, season = null, episode = null) {
+export async function getSubtitles(type, imdbId, season = null, episode = null, release = '') {
   try {
     if (!/^tt\d+$/.test(String(imdbId))) return [];
 
@@ -50,52 +104,48 @@ export async function getSubtitles(type, imdbId, season = null, episode = null) 
       return [];
     }
 
-    const latinoList = [];
-    const spanishList = [];
-    const englishList = [];
+    const latinoPool = [];
+    const spanishPool = [];
+    const englishPool = [];
 
     for (const sub of data.subtitles) {
       const lang = (sub.lang || '').toLowerCase();
       if (!sub.url) continue;
       try { validateSubtitleUrl(sub.url); } catch { continue; }
+      const subRelease = String(sub.release || sub.name || sub.title || '').slice(0, 120);
+      const score = scoreSubtitleRelease(subRelease, release);
+      const matching = score >= 30 ? 'release-matched' : 'unverified';
+      const entry = { raw: sub, subRelease, score, matching };
 
       if (lang === 'spl' || lang === 'es-mx' || lang === 'es-la') {
-        if (latinoList.length < 6) {
-          latinoList.push({
-            id: `lat-${sub.id || latinoList.length + 1}`,
-            lang: 'es-MX',
-            langGroup: 'latino',
-            label: `🇲🇽 Español Latino #${latinoList.length + 1}`,
-            release: String(sub.release || sub.name || sub.title || '').slice(0, 120), matching: 'unverified',
-            vttUrl: registerSubtitle(sub.url),
-          });
-        }
+        latinoPool.push(entry);
       } else if (['spa', 'es', 'esp', 'spanish'].includes(lang)) {
-        if (spanishList.length < 8) {
-          spanishList.push({
-            id: `spa-${sub.id || spanishList.length + 1}`,
-            lang: 'es',
-            langGroup: 'castellano',
-            label: `🇪🇸 Español #${spanishList.length + 1}`,
-            release: String(sub.release || sub.name || sub.title || '').slice(0, 120), matching: 'unverified',
-            vttUrl: registerSubtitle(sub.url),
-          });
-        }
+        spanishPool.push(entry);
       } else if (['eng', 'en', 'english'].includes(lang)) {
-        if (englishList.length < 4) {
-          englishList.push({
-            id: `eng-${sub.id || englishList.length + 1}`,
-            lang: 'en',
-            langGroup: 'en',
-            label: `🇺🇸 English CC #${englishList.length + 1}`,
-            release: String(sub.release || sub.name || sub.title || '').slice(0, 120), matching: 'unverified',
-            vttUrl: registerSubtitle(sub.url),
-          });
-        }
+        englishPool.push(entry);
       }
     }
 
-    return [...latinoList, ...spanishList, ...englishList];
+    const sortAndSlice = (pool, limit, prefix, langCode, langGroup, baseLabel) =>
+      pool
+        .sort((a, b) => b.score - a.score)
+        .slice(0, limit)
+        .map((item, idx) => ({
+          id: `${prefix}-${item.raw.id || idx + 1}`,
+          lang: langCode,
+          langGroup,
+          label: `${item.matching === 'release-matched' ? '✓ Sync · ' : ''}${baseLabel} #${idx + 1}`,
+          release: item.subRelease,
+          score: item.score,
+          matching: item.matching,
+          vttUrl: registerSubtitle(item.raw.url),
+        }));
+
+    return [
+      ...sortAndSlice(latinoPool, 6, 'lat', 'es-MX', 'latino', '🇲🇽 Español Latino'),
+      ...sortAndSlice(spanishPool, 8, 'spa', 'es', 'castellano', '🇪🇸 Español'),
+      ...sortAndSlice(englishPool, 4, 'eng', 'en', 'en', '🇺🇸 English CC'),
+    ];
   } catch (error) {
     console.error('[SubtitleService Error]:', error.message);
     return [];
@@ -116,4 +166,5 @@ export default {
   getSpanishSubtitles,
   convertSrtToVtt,
   fetchSubtitle,
+  scoreSubtitleRelease,
 };

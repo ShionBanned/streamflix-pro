@@ -12,17 +12,40 @@ export function waitForTorrent(torrent, { timeoutMs = 45000 } = {}) {
   });
 }
 
+const IMAGE_SUBTITLE_CODECS = /^(?:hdmv_pgs_subtitle|pgssub|dvd_subtitle|dvdsub|dvb_subtitle|dvbsub|xsub)$/i;
+
 export function parseMediaInfo(text) {
   const durationMatch = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/.exec(text);
   const duration = durationMatch ? Number(durationMatch[1]) * 3600 + Number(durationMatch[2]) * 60 + Number(durationMatch[3]) : null;
   const audioTracks = [];
+  const subtitleTracks = [];
   for (const line of text.split(/\r?\n/)) {
     const audio = /Stream #0:(\d+)(.*?): Audio:\s*([^,\s]+)/.exec(line);
-    if (!audio) continue;
-    const lang = /\(([a-z]{2,3}(?:-[a-z]{2})?)\)/i.exec(audio[2])?.[1] || 'und';
-    if (!audioTracks.some(track => track.streamIndex === Number(audio[1]))) audioTracks.push({ index: audioTracks.length, streamIndex: Number(audio[1]), lang, codec: audio[3], label: `${lang.toUpperCase()} · ${audio[3]}` });
+    if (audio) {
+      const lang = /\(([a-z]{2,3}(?:-[a-z]{2})?)\)/i.exec(audio[2])?.[1] || 'und';
+      if (!audioTracks.some(track => track.streamIndex === Number(audio[1]))) {
+        audioTracks.push({ index: audioTracks.length, streamIndex: Number(audio[1]), lang, codec: audio[3], label: `${lang.toUpperCase()} · ${audio[3]}` });
+      }
+      continue;
+    }
+    const sub = /Stream #0:(\d+)(.*?): Subtitle:\s*([^,\s]+)/.exec(line);
+    if (sub) {
+      const lang = /\(([a-z]{2,3}(?:-[a-z]{2})?)\)/i.exec(sub[2])?.[1] || 'und';
+      const codec = sub[3];
+      const textBased = !IMAGE_SUBTITLE_CODECS.test(codec);
+      if (!subtitleTracks.some(track => track.streamIndex === Number(sub[1]))) {
+        subtitleTracks.push({
+          index: subtitleTracks.length,
+          streamIndex: Number(sub[1]),
+          lang,
+          codec,
+          textBased,
+          label: `⚡ Integrado (${lang.toUpperCase()}) · ${codec}`,
+        });
+      }
+    }
   }
-  return { duration, audioTracks, videoCodec: /Stream #0:\d+[^\r\n]*?: Video:\s*([^,\s]+)/.exec(text)?.[1] || null };
+  return { duration, audioTracks, subtitleTracks, videoCodec: /Stream #0:\d+[^\r\n]*?: Video:\s*([^,\s]+)/.exec(text)?.[1] || null };
 }
 
 export function selectAudioTrack(tracks, { audioLang = 'vose', originalLanguage, audioTrack = 0, manualAudio = false } = {}) {
@@ -42,6 +65,34 @@ export function probeMedia(input, { spawnImpl = spawn, timeoutMs = 20000 } = {})
     const timeout = setTimeout(() => { process.kill(); finish(); }, timeoutMs);
     process.stderr.on('data', chunk => { if (stderr.length < 65536) stderr += chunk.toString(); });
     process.stdout.resume(); process.once('error', finish); process.once('close', finish);
+  });
+}
+
+export function extractSubtitleVtt(input, trackIndex = 0, { spawnImpl = spawn, timeoutMs = 45000 } = {}) {
+  return new Promise((resolve, reject) => {
+    const idx = Number(trackIndex);
+    if (!Number.isInteger(idx) || idx < 0 || idx > 50) return reject(new Error('Pista de subtítulo no válida.'));
+    const child = spawnImpl('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-i', input, '-map', `0:s:${idx}`, '-f', 'webvtt', 'pipe:1'], { windowsHide: true });
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    const finishError = (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(err);
+    };
+    const timer = setTimeout(() => { child.kill(); finishError(new Error('Tiempo agotado extrayendo subtítulo integrado.')); }, timeoutMs);
+    child.stdout.on('data', chunk => { if (stdout.length < 4 * 1024 * 1024) stdout += chunk.toString('utf8'); });
+    child.stderr.on('data', chunk => { if (stderr.length < 4096) stderr += chunk.toString('utf8'); });
+    child.once('error', finishError);
+    child.once('close', code => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (code === 0 && stdout.trim().startsWith('WEBVTT')) resolve(stdout);
+      else finishError(new Error(stderr.trim() || 'No se pudo extraer la pista de subtítulos integrada.'));
+    });
   });
 }
 

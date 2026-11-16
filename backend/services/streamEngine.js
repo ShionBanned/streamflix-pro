@@ -327,6 +327,7 @@ class StreamEngine {
     const info = cachedInfo && !cachedInfo.then ? cachedInfo : null;
     return {
       audioTracks: info?.audioTracks || [],
+      subtitleTracks: info?.subtitleTracks || [],
       mediaDuration: info?.duration || null,
       active: true,
       ready: Boolean(torrent.ready),

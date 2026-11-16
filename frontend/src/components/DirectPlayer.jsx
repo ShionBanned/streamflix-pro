@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
-import { toWebVtt } from '../../../shared/subtitleUtils.mjs';
+import { toWebVtt, parseWebVttCues } from '../../../shared/subtitleUtils.mjs';
+import SubtitleOverlay from './SubtitleOverlay.jsx';
 import { shiftSubtitleCues } from '../../../shared/playerUtils.mjs';
 import AiSubtitleControl from './AiSubtitleControl.jsx';
 import ExternalAudio from './ExternalAudio.jsx';
@@ -11,7 +12,7 @@ export default function DirectPlayer({ url, initialTime = 0, onProgress }) {
   const progressRef = useRef(onProgress); progressRef.current = onProgress;
   const [message, setMessage] = useState('Conectando con la fuente directa…');
   const [showTools, setShowTools] = useState(false);
-  const [audio, setAudio] = useState([]); const [subtitles, setSubtitles] = useState([]); const [local, setLocal] = useState(null); const [selectedSub, setSelectedSub] = useState('off'); const [offset, setOffset] = useState(0);
+  const [audio, setAudio] = useState([]); const [subtitles, setSubtitles] = useState([]); const [local, setLocal] = useState(null); const [localCues, setLocalCues] = useState([]); const [selectedSub, setSelectedSub] = useState('off'); const [offset, setOffset] = useState(0);
   useEffect(() => {
     const video = videoRef.current; let alive = true; let recovered = false;
     setAudio([]); setSubtitles([]); setSelectedSub('off'); setMessage('Conectando con la fuente directa…');
@@ -49,7 +50,9 @@ export default function DirectPlayer({ url, initialTime = 0, onProgress }) {
     if (!video) return;
     for (const track of Array.from(video.textTracks)) track.mode = 'disabled';
     if (hls) { hls.subtitleDisplay = selectedSub.startsWith('hls:'); hls.subtitleTrack = selectedSub.startsWith('hls:') ? Number(selectedSub.split(':')[1]) : -1; }
-    if (selectedSub === 'local') { const track = video.querySelector('track')?.track; if (track) track.mode = 'showing'; }
+    if (selectedSub === 'local' && local?.url) {
+      fetch(local.url).then(r => r.text()).then(t => setLocalCues(parseWebVttCues(/^WEBVTT/.test(t.trim()) ? t : toWebVtt(t)))).catch(() => setLocalCues([]));
+    } else { setLocalCues([]); }
   }, [selectedSub, local]);
   const syncOffset = () => {
     const video = videoRef.current; if (!video) return;
@@ -71,8 +74,18 @@ export default function DirectPlayer({ url, initialTime = 0, onProgress }) {
     <video ref={videoRef} controls playsInline crossOrigin="anonymous" className="w-full min-h-0 flex-1 object-contain" data-subtitle-offset={offset} onTimeUpdate={event => {
       const video = event.currentTarget; if (Number.isFinite(video.duration)) progressRef.current?.({ currentTime: video.currentTime, duration: video.duration });
     }}>
-      {local && <track key={local.url} kind="subtitles" label={local.name} srcLang="und" src={local.url} default={selectedSub === 'local'} onLoad={event => { if (selectedSub === 'local') event.currentTarget.track.mode = 'showing'; syncOffset(); }} onError={() => setMessage('No se pudo interpretar ese subtítulo.')} />}
     </video>
+    {selectedSub === 'local' && localCues.length > 0 && (
+      <SubtitleOverlay
+        videoRef={videoRef}
+        cues={localCues}
+        offset={offset}
+        hudVisible={true}
+        size={localStorage.getItem('sf_sub_size') || 'large'}
+        position={localStorage.getItem('sf_sub_pos') || 'raised'}
+        backdrop={localStorage.getItem('sf_sub_bg') === '1'}
+      />
+    )}
     <div className="relative z-10 min-h-14 px-4 sm:px-6 py-2.5 flex items-center justify-between gap-3 bg-[#111]/95 border-t border-white/10 text-white">
       <span role="status" className="min-w-0 flex items-center gap-2 text-xs text-neutral-300"><span className={`w-2 h-2 rounded-full shrink-0 ${message.startsWith('Reproduciendo') ? 'bg-emerald-400' : 'bg-amber-400'}`} /><span className="truncate">{message}</span></span>
       <button type="button" onClick={() => setShowTools(value => !value)} aria-expanded={showTools} className={`shrink-0 flex items-center gap-2 px-3 py-2 rounded-md text-xs font-semibold border transition ${showTools ? 'bg-white text-black border-white' : 'bg-white/10 text-white border-white/15 hover:bg-white/20'}`}><Settings2 className="w-4 h-4" /> Audio y subtítulos</button>

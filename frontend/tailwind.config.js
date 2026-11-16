@@ -16,7 +16,8 @@ export default {
         },
       },
       fontFamily: {
-        netflix: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+        sans: ['Netflix Sans', 'Inter', 'system-ui', '-apple-system', 'sans-serif'],
+        netflix: ['Netflix Sans', 'Inter', 'system-ui', '-apple-system', 'sans-serif'],
       },
     },
   },

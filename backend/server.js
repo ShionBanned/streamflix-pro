@@ -9,6 +9,7 @@ import torrentio from './services/torrentio.js';
 import streamEngine from './services/streamEngine.js';
 import iptvService from './services/iptvParser.js';
 import subtitleService from './services/subtitleService.js';
+import { extractSubtitleVtt } from './services/mediaTools.js';
 import externalPlayer from './services/externalPlayer.js';
 import fs from 'node:fs';
 import { aiAvailable, getAiJob, getAiVtt, publicAiJob, receiveUpload, startP2pJob, startUploadJob } from './services/aiSubtitles.js';
@@ -344,6 +345,22 @@ app.get('/api/stream/:infoHash/status', (req, res) => {
   res.json(status);
 });
 
+app.get('/api/stream/:infoHash/subtitle/:trackIndex', async (req, res) => {
+  const { infoHash, trackIndex } = req.params;
+  if (!/^[0-9a-f]{40}$/i.test(String(infoHash || ''))) return res.status(400).json({ error: 'infoHash inválido' });
+  const idx = Number(trackIndex);
+  if (!Number.isInteger(idx) || idx < 0 || idx > 50) return res.status(400).json({ error: 'Pista inválida' });
+  try {
+    const fileIdx = Number.isInteger(Number(req.query.fileIdx)) ? Number(req.query.fileIdx) : 0;
+    const rawUrl = `http://127.0.0.1:${req.socket.localPort}/api/stream/${infoHash}?fileIdx=${fileIdx}&raw=1`;
+    const vtt = await extractSubtitleVtt(rawUrl, idx);
+    res.setHeader('Cache-Control', 'no-store');
+    res.type('text/vtt').send(vtt);
+  } catch (err) {
+    res.status(502).json({ error: err.message || 'No se pudo extraer el subtítulo integrado' });
+  }
+});
+
 app.post('/api/stream/close', (req, res) => {
   const { infoHash } = req.body;
   if (infoHash) {
@@ -359,9 +376,9 @@ app.post('/api/stream/close', (req, res) => {
 app.get('/api/subtitles/:type/:imdbId', async (req, res) => {
   try {
     const { type, imdbId } = req.params;
-    const { season, episode } = req.query;
+    const { season, episode, release = '' } = req.query;
 
-    const subtitles = await subtitleService.getSubtitles(type, imdbId, season, episode);
+    const subtitles = await subtitleService.getSubtitles(type, imdbId, season, episode, release);
     res.json({
       imdbId,
       total: subtitles.length,

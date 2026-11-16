@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import axios from 'axios';
 import { readPlayerMessage, shiftSubtitleCues, nextCloudMirror } from '../../../shared/playerUtils.mjs';
-import { toWebVtt } from '../../../shared/subtitleUtils.mjs';
+import { toWebVtt, parseWebVttCues } from '../../../shared/subtitleUtils.mjs';
 import { buildEmbedServers } from '../../../shared/cloudProviders.mjs';
 import api from '../services/api.js';
 import CustomSelect from './CustomSelect.jsx';
 import AiSubtitleControl from './AiSubtitleControl.jsx';
+import SubtitleOverlay from './SubtitleOverlay.jsx';
 import ExternalAudio from './ExternalAudio.jsx';
 import {
   X,
@@ -185,6 +186,15 @@ export default function SmartPlayer({
 
   const [subtitles, setSubtitles] = useState([]);
   const [selectedSubId, setSelectedSubId] = useState('off');
+  const [activeSubtitleCues, setActiveSubtitleCues] = useState([]);
+  const [subtitleRate, setSubtitleRate] = useState(1);
+  const [subtitleSize, setSubtitleSize] = useState(() => localStorage.getItem('sf_sub_size') || 'large');
+  const [subtitlePosition, setSubtitlePosition] = useState(() => localStorage.getItem('sf_sub_pos') || 'raised');
+  const [subtitleBackdrop, setSubtitleBackdrop] = useState(() => localStorage.getItem('sf_sub_bg') === '1');
+  const [subMenuTab, setSubMenuTab] = useState('tracks'); // 'tracks' | 'sync' | 'style'
+  const [showAiSubPanel, setShowAiSubPanel] = useState(false);
+  const [cuePreviewIdx, setCuePreviewIdx] = useState(null);
+  const manualSubRef = useRef(false);
   const embedFrameRef = useRef(null);
   const cloudProgressConfirmedRef = useRef(false);
   const cloudLastSavedRef = useRef(null);
@@ -457,8 +467,9 @@ export default function SmartPlayer({
           const data = res.value;
           setResolutionData(data);
 
+          let preferredStream = null;
           if (data.streams?.length > 0) {
-            const preferredStream =
+            preferredStream =
               data.streams.find(
                 (s) =>
                   (s.languageCode === selectedLanguage || s.languageCode === 'multi') &&
@@ -476,19 +487,33 @@ export default function SmartPlayer({
 
           if (data.imdbId) {
             try {
+              const activeRelease = preferredStream?.title || data.bestStream?.title || '';
               const subs = await api.getSubtitles(
                 isSeries ? 'series' : 'movie',
                 data.imdbId,
                 isSeries ? currentSeason : null,
-                isSeries ? currentEpisode : null
+                isSeries ? currentEpisode : null,
+                activeRelease
               );
               if (isMounted && subs) {
-                setSubtitles([...subs, ...(localSubtitleRef.current ? [localSubtitleRef.current] : [])]);
-                if (localSubtitleRef.current) { setSelectedSubId(localSubtitleRef.current.id); } else if (selectedLanguage === 'vose' || activeAudioPreset === 'vose-sub') {
-                  const esSub = subs.find((s) => s.langGroup !== 'en') || subs[0];
+                setSubtitles((prev) => {
+                  const embedded = prev.filter((entry) => entry.matching === 'embedded');
+                  return [...embedded, ...subs, ...(localSubtitleRef.current ? [localSubtitleRef.current] : [])];
+                });
+                if (localSubtitleRef.current) {
+                  setSelectedSubId(localSubtitleRef.current.id);
+                } else if (selectedLanguage === 'vose' || activeAudioPreset === 'vose-sub') {
+                  const esSub =
+                    subs.find((s) => s.langGroup === 'latino' && s.matching === 'release-matched') ||
+                    subs.find((s) => s.langGroup !== 'en' && s.matching === 'release-matched') ||
+                    subs.find((s) => s.langGroup !== 'en') ||
+                    subs[0];
                   setSelectedSubId(esSub ? esSub.id : 'off');
                 } else if (selectedLanguage === 'en') {
-                  const enSub = subs.find((s) => s.langGroup === 'en') || subs[0];
+                  const enSub =
+                    subs.find((s) => s.langGroup === 'en' && s.matching === 'release-matched') ||
+                    subs.find((s) => s.langGroup === 'en') ||
+                    subs[0];
                   setSelectedSubId(enSub ? enSub.id : 'off');
                 } else {
                   setSelectedSubId('off');
@@ -760,28 +785,124 @@ export default function SmartPlayer({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [activeServer, activeDrawer, handleSafeClose, forceTranscode, duration]);
 
-  const syncSubtitleTracks = useCallback(() => {
-    const video = videoRef.current; if (!video) return;
-    const selected = subtitles.find(sub => sub.id === selectedSubId);
-    for (const element of video.querySelectorAll('track')) {
-      element.track.mode = selected && element.dataset.subtitleId === selected.id ? 'showing' : 'disabled';
-      shiftSubtitleCues(element.track.cues, subtitleOffset - (forceTranscode ? transcodeStart : 0), subtitleOriginalsRef.current);
+  const syncSubtitleTracks = useCallback(() => {}, []);
+  const subSyncKey = selectedSubId !== 'off'
+    ? `sf_sub_sync:${item.id}:${currentSeason || 0}:${currentEpisode || 0}:${selectedSubId}`
+    : null;
+
+  const updateSubtitleSync = useCallback((nextOffset, nextRate = subtitleRate) => {
+    const clamped = Math.max(-120, Math.min(120, Math.round(nextOffset * 10) / 10));
+    setSubtitleOffset(clamped);
+    setSubtitleRate(nextRate);
+    if (subSyncKey) {
+      try { localStorage.setItem(subSyncKey, JSON.stringify({ offset: clamped, rate: nextRate })); } catch {}
     }
-  }, [subtitles, selectedSubId, subtitleOffset, forceTranscode, transcodeStart]);
-  useEffect(() => { syncSubtitleTracks(); }, [syncSubtitleTracks, selectedP2PStream?.infoHash, forceTranscode]);
-  const adjustSubtitleOffset = delta => setSubtitleOffset(value => Math.max(-120, Math.min(120, Math.round((value + delta) * 10) / 10)));
+  }, [subSyncKey, subtitleRate]);
+
+  const adjustSubtitleOffset = (delta) => updateSubtitleSync(subtitleOffset + delta, subtitleRate);
+
+  useEffect(() => {
+    try { localStorage.setItem('sf_sub_size', subtitleSize); } catch {}
+  }, [subtitleSize]);
+  useEffect(() => {
+    try { localStorage.setItem('sf_sub_pos', subtitlePosition); } catch {}
+  }, [subtitlePosition]);
+  useEffect(() => {
+    try { localStorage.setItem('sf_sub_bg', subtitleBackdrop ? '1' : '0'); } catch {}
+  }, [subtitleBackdrop]);
+
+  // Integrar pistas de subtítulos embebidas en el MKV/MP4 (100% sincronizadas)
+  useEffect(() => {
+    const embeddedTracks = (torrentStatus?.subtitleTracks || []).filter((t) => t.textBased);
+    if (!selectedP2PStream?.infoHash || !embeddedTracks.length) return;
+    const fileIdx = selectedP2PStream.fileIdx ?? 0;
+    const mapped = embeddedTracks.map((t) => {
+      const l = (t.lang || '').toLowerCase();
+      const langGroup = ['spa', 'es', 'es-mx', 'es-la'].includes(l) ? 'latino' : ['eng', 'en'].includes(l) ? 'en' : 'other';
+      return {
+        id: `embedded-${selectedP2PStream.infoHash}-${t.index}`,
+        lang: t.lang || 'und',
+        langGroup,
+        label: t.label,
+        matching: 'embedded',
+        vttUrl: `/api/stream/${selectedP2PStream.infoHash}/subtitle/${t.index}?fileIdx=${fileIdx}`,
+      };
+    });
+    setSubtitles((prev) => {
+      const prevEmb = prev.filter((entry) => entry.matching === 'embedded').map((e) => e.id).join(',');
+      const nextEmb = mapped.map((e) => e.id).join(',');
+      if (prevEmb === nextEmb) return prev;
+      const rest = prev.filter((entry) => entry.matching !== 'embedded');
+      return [...mapped, ...rest];
+    });
+    if (!manualSubRef.current && (selectedLanguage === 'vose' || activeAudioPreset === 'vose-sub')) {
+      const embeddedEs = mapped.find((m) => m.langGroup === 'latino');
+      if (embeddedEs) {
+        setSelectedSubId((currentId) => {
+          const current = subtitles.find((s) => s.id === currentId);
+          return !current || current.matching === 'unverified' ? embeddedEs.id : currentId;
+        });
+      }
+    }
+  }, [torrentStatus?.subtitleTracks, selectedP2PStream?.infoHash, selectedP2PStream?.fileIdx, selectedLanguage, activeAudioPreset]);
+
+  const selectedSubUrl = useMemo(
+    () => (selectedSubId === 'off' ? '' : subtitles.find((sub) => sub.id === selectedSubId)?.vttUrl || ''),
+    [subtitles, selectedSubId]
+  );
+
+  // Cargar y parsear cues WebVTT del subtítulo activo
+  useEffect(() => {
+    if (selectedSubId === 'off' || !selectedSubUrl) {
+      setActiveSubtitleCues([]);
+      return;
+    }
+    if (subSyncKey) {
+      try {
+        const saved = JSON.parse(localStorage.getItem(subSyncKey) || 'null');
+        if (saved && Number.isFinite(saved.offset)) setSubtitleOffset(saved.offset);
+        else setSubtitleOffset(0);
+        if (saved && Number.isFinite(saved.rate)) setSubtitleRate(saved.rate);
+        else setSubtitleRate(1);
+      } catch {
+        setSubtitleOffset(0);
+        setSubtitleRate(1);
+      }
+    }
+    let cancelled = false;
+    fetch(selectedSubUrl)
+      .then((res) => {
+        if (!res.ok) throw new Error('No se pudo cargar esa pista de subtítulos.');
+        return res.text();
+      })
+      .then((text) => {
+        if (cancelled) return;
+        const vtt = /^WEBVTT(?:\s|$)/.test(text.trim()) ? text : toWebVtt(text);
+        setActiveSubtitleCues(parseWebVttCues(vtt)); setCuePreviewIdx(null);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setActiveSubtitleCues([]);
+          setLaunchMessage({ type: 'error', text: 'No se pudo cargar esa pista. Prueba otra versión o un archivo SRT/VTT.' });
+        }
+      });
+    return () => { cancelled = true; };
+  }, [selectedSubId, selectedSubUrl, subSyncKey]);
+
   const importSubtitle = async event => {
     const file = event.target.files?.[0]; event.target.value = ''; if (!file) return;
     try {
       if (file.size > 2 * 1024 * 1024) throw new Error('El subtítulo no puede superar 2 MB.');
       const vtt = toWebVtt(await file.text());
       if (localSubtitleRef.current) URL.revokeObjectURL(localSubtitleRef.current.vttUrl);
-      const sub = { id: 'local-subtitle', label: file.name, lang: 'und', vttUrl: URL.createObjectURL(new Blob([vtt], { type: 'text/vtt' })) };
+      const sub = { id: 'local-subtitle', label: `📄 ${file.name}`, lang: 'und', matching: 'local', vttUrl: URL.createObjectURL(new Blob([vtt], { type: 'text/vtt' })) };
+      manualSubRef.current = true;
       localSubtitleRef.current = sub; setSubtitles(current => [...current.filter(entry => entry.id !== sub.id), sub]); setSelectedSubId(sub.id);
     } catch (error) { setLaunchMessage({ type: 'error', text: error.message }); }
   };
   useEffect(() => {
-    setSubtitles([]); setSelectedSubId('off'); setSubtitleOffset(0); setCloudHealth([]); attemptedCloudRef.current.clear(); audioTrackManualRef.current = false;
+    manualSubRef.current = false;
+    setSubtitles([]); setSelectedSubId('off'); setActiveSubtitleCues([]); setSubtitleOffset(0); setSubtitleRate(1); setCloudHealth([]); attemptedCloudRef.current.clear(); audioTrackManualRef.current = false;
     return () => { if (localSubtitleRef.current) { URL.revokeObjectURL(localSubtitleRef.current.vttUrl); localSubtitleRef.current = null; } };
   }, [item.id, currentSeason, currentEpisode]);
   useEffect(() => {
@@ -1934,20 +2055,20 @@ export default function SmartPlayer({
               autoPlay
               playsInline
             >
-              {subtitles.map((sub) => (
-                <track
-                  key={sub.id}
-                  kind="subtitles"
-                  data-subtitle-id={sub.id}
-                  onLoad={syncSubtitleTracks}
-                  onError={() => setLaunchMessage({ type: 'error', text: 'No se pudo cargar esa pista. Prueba otra versión o un archivo SRT/VTT.' })}
-                  src={sub.vttUrl}
-                  srcLang={sub.lang}
-                  label={sub.label}
-                  default={sub.id === selectedSubId}
-                />
-              ))}
             </video>
+
+            <SubtitleOverlay
+              videoRef={videoRef}
+              videoKey={`${selectedP2PStream.infoHash}-${selectedP2PStream.fileIdx ?? 0}-${forceTranscode}-${selectedAudioTrackIdx}`}
+              cues={activeSubtitleCues}
+              offset={subtitleOffset}
+              rate={subtitleRate}
+              transcodeOffset={forceTranscode ? transcodeStart : 0}
+              hudVisible={showHud || !isPlaying}
+              size={subtitleSize}
+              position={subtitlePosition}
+              backdrop={subtitleBackdrop}
+            />
 
             {/* Indicador de Buffering P2P Persistente (NO te saca de Torrentio automáticamente) */}
             {isBuffering && !videoError && (
@@ -2100,55 +2221,276 @@ export default function SmartPlayer({
                       <span>Subtítulos ({subtitles.length})</span>
                     </button>
 
-                    {activeDrawer === 'subtitles' && (
-                      <div className="absolute bottom-10 left-0 bg-[#161616] border border-white/15 rounded-xl shadow-2xl p-2 w-60 max-h-56 overflow-y-auto z-50 space-y-1">
-                        <button
-                          onClick={() => {
-                            setSelectedSubId('off');
-                            setActiveDrawer(null);
-                          }}
-                          className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-semibold ${
-                            selectedSubId === 'off'
-                              ? 'bg-[#E50914] text-white'
-                              : 'text-neutral-300 hover:bg-neutral-800'
-                          }`}
-                        >
-                          ✕ Desactivados
-                        </button>
-                        <label className="block text-xs p-2 cursor-pointer text-amber-300">Cargar SRT/VTT<input type="file" accept=".srt,.vtt" onChange={importSubtitle} className="block w-full mt-1 text-[10px]" /></label>
-                        <AiSubtitleControl p2p={selectedP2PStream ? { infoHash: selectedP2PStream.infoHash, fileIdx: selectedP2PStream.fileIdx ?? 0, audioTrack: selectedAudioTrackIdx, audioLang: selectedLanguage, originalLanguage, manualAudio: audioTrackManualRef.current } : null} onReady={({ id, url, label }) => { const sub = { id: `ai-${id}`, label, lang: 'und', vttUrl: url }; setSubtitles(current => [...current.filter(entry => !entry.id.startsWith('ai-')), sub]); setSelectedSubId(sub.id); }} />
-                        {subtitles.map((sub) => (
-                          <button
-                            key={sub.id}
-                            onClick={() => {
-                              setSelectedSubId(sub.id);
-                              setActiveDrawer(null);
-                            }}
-                            className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs truncate ${
-                              selectedSubId === sub.id
-                                ? 'bg-[#E50914] text-white font-bold'
-                                : 'text-neutral-300 hover:bg-neutral-800'
-                            }`}
-                          >
-                            {sub.label}
-                          </button>
-                        ))}
+                    {activeDrawer === 'subtitles' && (() => {
+                      const mediaNow = (videoRef.current?.currentTime || currentTime || 0) + (forceTranscode ? transcodeStart : 0);
+                      const nearestIdx = activeSubtitleCues.length
+                        ? Math.max(0, activeSubtitleCues.findIndex((c) => c.end * subtitleRate + subtitleOffset >= mediaNow))
+                        : 0;
+                      const previewIdx = cuePreviewIdx !== null && activeSubtitleCues[cuePreviewIdx] ? cuePreviewIdx : nearestIdx;
+                      const previewCue = activeSubtitleCues[previewIdx] || null;
+                      return (
+                      <div
+                        onClick={(e) => e.stopPropagation()}
+                        className="absolute bottom-10 left-0 bg-[#141414]/98 backdrop-blur-xl border border-white/15 rounded-xl shadow-2xl w-80 max-w-[90vw] z-50 overflow-hidden"
+                      >
+                        <div className="grid grid-cols-3 border-b border-white/10 bg-white/[0.03] text-[11px] font-bold">
+                          {[
+                            ['tracks', 'Pistas'],
+                            ['sync', 'Sincronizar'],
+                            ['style', 'Estilo'],
+                          ].map(([tabId, tabLabel]) => (
+                            <button
+                              key={tabId}
+                              onClick={() => setSubMenuTab(tabId)}
+                              className={`py-2.5 text-center transition ${
+                                subMenuTab === tabId
+                                  ? 'text-white border-b-2 border-[#E50914] bg-white/[0.05]'
+                                  : 'text-neutral-400 hover:text-white'
+                              }`}
+                            >
+                              {tabLabel}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="p-3 max-h-[58vh] overflow-y-auto space-y-2.5">
+                          {subMenuTab === 'tracks' && (
+                            <>
+                              <button
+                                onClick={() => {
+                                  manualSubRef.current = true;
+                                  setSelectedSubId('off');
+                                  setActiveDrawer(null);
+                                }}
+                                className={`w-full text-left px-3 py-2 rounded-lg text-xs font-semibold transition ${
+                                  selectedSubId === 'off'
+                                    ? 'bg-[#E50914] text-white'
+                                    : 'bg-white/5 text-neutral-300 hover:bg-white/10'
+                                }`}
+                              >
+                                ✕ Desactivar subtítulos
+                              </button>
+
+                              <div className="space-y-1">
+                                {subtitles.length === 0 ? (
+                                  <p className="text-[11px] text-neutral-400 px-1 py-2">
+                                    No se encontraron subtítulos automáticos. Puedes cargar un archivo .SRT/.VTT o generarlos con IA.
+                                  </p>
+                                ) : (
+                                  subtitles.map((sub) => (
+                                    <button
+                                      key={sub.id}
+                                      onClick={() => {
+                                        manualSubRef.current = true;
+                                        setSelectedSubId(sub.id);
+                                        setActiveDrawer(null);
+                                      }}
+                                      title={sub.release || sub.label}
+                                      className={`w-full text-left px-3 py-2 rounded-lg text-xs flex items-center justify-between gap-2 transition ${
+                                        selectedSubId === sub.id
+                                          ? 'bg-[#E50914] text-white font-bold'
+                                          : 'text-neutral-200 hover:bg-white/10'
+                                      }`}
+                                    >
+                                      <span className="truncate">{sub.label}</span>
+                                      {sub.matching === 'embedded' && (
+                                        <span className="shrink-0 text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold">100%</span>
+                                      )}
+                                    </button>
+                                  ))
+                                )}
+                              </div>
+
+                              <div className="pt-2 border-t border-white/10 space-y-2">
+                                <label className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-white/10 hover:bg-white/15 text-xs font-semibold text-amber-300 cursor-pointer transition">
+                                  <span>+ Cargar archivo .SRT / .VTT</span>
+                                  <input type="file" accept=".srt,.vtt" onChange={importSubtitle} className="hidden" />
+                                </label>
+
+                                <button
+                                  onClick={() => setShowAiSubPanel((v) => !v)}
+                                  className="w-full text-left px-2 py-1 text-[11px] font-semibold text-neutral-400 hover:text-white flex items-center justify-between"
+                                >
+                                  <span>Generar subtítulos con IA (Whisper)</span>
+                                  <span>{showAiSubPanel ? '▲' : '▼'}</span>
+                                </button>
+                                {showAiSubPanel && (
+                                  <AiSubtitleControl
+                                    p2p={selectedP2PStream ? { infoHash: selectedP2PStream.infoHash, fileIdx: selectedP2PStream.fileIdx ?? 0, audioTrack: selectedAudioTrackIdx, audioLang: selectedLanguage, originalLanguage, manualAudio: audioTrackManualRef.current } : null}
+                                    onReady={({ id, url, label }) => {
+                                      manualSubRef.current = true;
+                                      const sub = { id: `ai-${id}`, label, lang: 'und', matching: 'ai', vttUrl: url };
+                                      setSubtitles((current) => [...current.filter((entry) => !entry.id.startsWith('ai-')), sub]);
+                                      setSelectedSubId(sub.id);
+                                    }}
+                                  />
+                                )}
+                              </div>
+                            </>
+                          )}
+
+                          {subMenuTab === 'sync' && (
+                            selectedSubId === 'off' ? (
+                              <p className="text-xs text-neutral-400 py-4 text-center">
+                                Activa primero una pista en la pestaña <strong>Pistas</strong> para ajustar su sincronía.
+                              </p>
+                            ) : (
+                              <div className="space-y-3">
+                                <div className="space-y-1.5">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-xs font-bold text-white">Desfase manual</span>
+                                    <span className="text-xs font-mono font-bold text-amber-300">{subtitleOffset > 0 ? `+${subtitleOffset}` : subtitleOffset}s</span>
+                                  </div>
+                                  <p className="text-[11px] text-neutral-400 leading-snug">
+                                    Si el texto sale <strong>antes</strong> de la voz, suma (+). Si sale <strong>después</strong>, resta (-).
+                                  </p>
+                                  <div className="grid grid-cols-5 gap-1 font-mono text-[11px]">
+                                    <button onClick={() => adjustSubtitleOffset(-5)} className="py-1.5 rounded bg-white/10 hover:bg-white/20 text-white font-bold">-5s</button>
+                                    <button onClick={() => adjustSubtitleOffset(-0.5)} className="py-1.5 rounded bg-white/10 hover:bg-white/20 text-white">-0.5</button>
+                                    <button onClick={() => updateSubtitleSync(0, 1)} className="py-1.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-bold" title="Volver a 0s">0s</button>
+                                    <button onClick={() => adjustSubtitleOffset(0.5)} className="py-1.5 rounded bg-white/10 hover:bg-white/20 text-white">+0.5</button>
+                                    <button onClick={() => adjustSubtitleOffset(5)} className="py-1.5 rounded bg-white/10 hover:bg-white/20 text-white font-bold">+5s</button>
+                                  </div>
+                                  <div className="grid grid-cols-4 gap-1 font-mono text-[10px]">
+                                    <button onClick={() => adjustSubtitleOffset(-30)} className="py-1 rounded bg-white/5 hover:bg-white/15 text-neutral-300">-30s</button>
+                                    <button onClick={() => adjustSubtitleOffset(-0.1)} className="py-1 rounded bg-white/5 hover:bg-white/15 text-neutral-300">-0.1s</button>
+                                    <button onClick={() => adjustSubtitleOffset(0.1)} className="py-1 rounded bg-white/5 hover:bg-white/15 text-neutral-300">+0.1s</button>
+                                    <button onClick={() => adjustSubtitleOffset(30)} className="py-1 rounded bg-white/5 hover:bg-white/15 text-neutral-300">+30s</button>
+                                  </div>
+                                </div>
+
+                                {previewCue && (
+                                  <div className="p-2.5 rounded-lg bg-white/[0.04] border border-white/10 space-y-2">
+                                    <div className="flex items-center justify-between text-[11px]">
+                                      <span className="font-bold text-white">Alinear con diálogo</span>
+                                      <span className="font-mono text-neutral-400">
+                                        {formatTime(previewCue.start * subtitleRate + subtitleOffset)}
+                                      </span>
+                                    </div>
+                                    <p className="text-[11px] text-neutral-200 italic line-clamp-2 min-h-[2rem]">
+                                      “{previewCue.text.replace(/<[^>]+>/g, '').replace(/\n/g, ' ')}”
+                                    </p>
+                                    <div className="flex items-center gap-1.5">
+                                      <button
+                                        onClick={() => setCuePreviewIdx(Math.max(0, previewIdx - 1))}
+                                        className="px-2 py-1 rounded bg-white/10 hover:bg-white/20 text-[11px] text-white"
+                                      >
+                                        ◀ Ant.
+                                      </button>
+                                      <button
+                                        onClick={() => setCuePreviewIdx(Math.min(activeSubtitleCues.length - 1, previewIdx + 1))}
+                                        className="px-2 py-1 rounded bg-white/10 hover:bg-white/20 text-[11px] text-white"
+                                      >
+                                        Sig. ▶
+                                      </button>
+                                      <button
+                                        onClick={() => {
+                                          const now = (videoRef.current?.currentTime || currentTime || 0) + (forceTranscode ? transcodeStart : 0);
+                                          updateSubtitleSync(now - previewCue.start * subtitleRate, subtitleRate);
+                                          setCuePreviewIdx(null);
+                                        }}
+                                        className="ml-auto px-2.5 py-1 rounded bg-[#E50914] hover:bg-red-700 text-[11px] font-bold text-white"
+                                      >
+                                        Traer aquí
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
+
+                                <div className="space-y-1 pt-1 border-t border-white/10">
+                                  <span className="text-[11px] font-bold text-neutral-300 block">Velocidad (si se atrasa poco a poco)</span>
+                                  <div className="grid grid-cols-3 gap-1 text-[10px]">
+                                    {[
+                                      [1, 'Normal'],
+                                      [25 / 23.976, 'Más lento'],
+                                      [23.976 / 25, 'Más rápido'],
+                                    ].map(([r, lbl]) => (
+                                      <button
+                                        key={lbl}
+                                        onClick={() => updateSubtitleSync(subtitleOffset, r)}
+                                        className={`py-1.5 rounded font-bold ${
+                                          Math.abs(subtitleRate - r) < 0.001
+                                            ? 'bg-[#E50914] text-white'
+                                            : 'bg-white/10 text-neutral-300 hover:bg-white/20'
+                                        }`}
+                                      >
+                                        {lbl}
+                                      </button>
+                                    ))}
+                                  </div>
+                                </div>
+                              </div>
+                            )
+                          )}
+
+                          {subMenuTab === 'style' && (
+                            <div className="space-y-3">
+                              <div className="space-y-1">
+                                <span className="text-xs font-bold text-neutral-200 block">Tamaño del texto</span>
+                                <div className="grid grid-cols-3 gap-1.5">
+                                  {[['normal', 'Normal'], ['large', 'Grande'], ['xlarge', 'Extra']].map(([k, lbl]) => (
+                                    <button key={k} onClick={() => setSubtitleSize(k)} className={`py-1.5 rounded-lg text-xs font-bold ${subtitleSize === k ? 'bg-[#E50914] text-white' : 'bg-white/10 text-neutral-300 hover:bg-white/20'}`}>{lbl}</button>
+                                  ))}
+                                </div>
+                              </div>
+                              <div className="space-y-1">
+                                <span className="text-xs font-bold text-neutral-200 block">Altura en pantalla</span>
+                                <div className="grid grid-cols-3 gap-1.5">
+                                  {[['low', 'Abajo'], ['raised', 'Elevado'], ['high', 'Alto']].map(([k, lbl]) => (
+                                    <button key={k} onClick={() => setSubtitlePosition(k)} className={`py-1.5 rounded-lg text-xs font-bold ${subtitlePosition === k ? 'bg-[#E50914] text-white' : 'bg-white/10 text-neutral-300 hover:bg-white/20'}`}>{lbl}</button>
+                                  ))}
+                                </div>
+                              </div>
+                              <div className="space-y-1">
+                                <span className="text-xs font-bold text-neutral-200 block">Fondo</span>
+                                <div className="grid grid-cols-2 gap-1.5">
+                                  <button onClick={() => setSubtitleBackdrop(false)} className={`py-1.5 rounded-lg text-xs font-bold ${!subtitleBackdrop ? 'bg-[#E50914] text-white' : 'bg-white/10 text-neutral-300 hover:bg-white/20'}`}>Sombra Netflix</button>
+                                  <button onClick={() => setSubtitleBackdrop(true)} className={`py-1.5 rounded-lg text-xs font-bold ${subtitleBackdrop ? 'bg-[#E50914] text-white' : 'bg-white/10 text-neutral-300 hover:bg-white/20'}`}>Caja oscura</button>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    )}
+                      );
+                    })()}
                   </div>
+
 
                   {selectedSubId !== 'off' && (
                     <div className="hidden sm:flex items-center gap-1 bg-white/5 px-2 py-0.5 rounded-full text-[10px]">
                       <button
                         onClick={() => adjustSubtitleOffset(-0.5)}
                         className="px-1 text-neutral-300 hover:text-white font-mono"
+                        title="Adelantar subtítulos 0.5s"
                       >
                         -0.5s
                       </button>
-                      <span className="font-mono text-amber-300">{subtitleOffset}s</span>
+                      <button
+                        onClick={() => adjustSubtitleOffset(-0.1)}
+                        className="px-1 text-neutral-400 hover:text-white font-mono"
+                        title="Adelantar 0.1s"
+                      >
+                        -0.1
+                      </button>
+                      <button
+                        onClick={() => updateSubtitleSync(0, 1)}
+                        className="font-mono text-amber-300 px-1"
+                        title="Reiniciar sincronía a 0s"
+                      >
+                        {subtitleOffset}s
+                      </button>
+                      <button
+                        onClick={() => adjustSubtitleOffset(0.1)}
+                        className="px-1 text-neutral-400 hover:text-white font-mono"
+                        title="Retrasar 0.1s"
+                      >
+                        +0.1
+                      </button>
                       <button
                         onClick={() => adjustSubtitleOffset(0.5)}
                         className="px-1 text-neutral-300 hover:text-white font-mono"
+                        title="Retrasar subtítulos 0.5s"
                       >
                         +0.5s
                       </button>

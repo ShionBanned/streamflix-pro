@@ -448,8 +448,8 @@ export const api = {
     }
   },
 
-  async getSubtitles(type, imdbId, season, episode) {
-    const params = { season, episode };
+  async getSubtitles(type, imdbId, season, episode, release = '') {
+    const params = { season, episode, ...(release ? { release } : {}) };
     const res = await apiClient.get(`/subtitles/${type}/${imdbId}`, { params });
     return res.data?.subtitles || [];
   },
