@@ -14,7 +14,6 @@ export const DEFAULT_M3U_SOURCES = [
   { name: 'Deportes', url: 'https://iptv-org.github.io/iptv/categories/sports.m3u', country: 'global' },
   { name: 'Películas', url: 'https://iptv-org.github.io/iptv/categories/movies.m3u', country: 'global' },
   { name: 'Animación', url: 'https://iptv-org.github.io/iptv/categories/animation.m3u', country: 'global' },
-  { name: 'Pluto TV', url: 'https://raw.githubusercontent.com/HelmerLuzo/PlutoTV_HL/main/tv/m3u/PlutoTV_tv_es.m3u', country: 'latam' },
 ];
 
 export const COUNTRY_NAMES = {
@@ -29,19 +28,11 @@ export const COUNTRY_NAMES = {
 
 let aggregatedCache = null;
 let lastCacheTime = 0;
-const CACHE_TTL = 30 * 60 * 1000;
+const CACHE_TTL = 10 * 60 * 1000;
+const sourceChannelCache = new Map();
 
 export function normalizeCategory(rawGroup = '', channelName = '', channelUrl = '', sourceName = '') {
   const text = `${rawGroup} ${channelName} ${channelUrl} ${sourceName}`.toLowerCase();
-
-  if (
-    text.includes('pluto.tv') ||
-    text.includes('jmp2.uk/plu-') ||
-    text.includes('plutotv') ||
-    sourceName === 'Pluto TV'
-  ) {
-    return 'Pluto TV 24/7';
-  }
 
   if (
     text.includes('sport') ||
@@ -58,6 +49,8 @@ export function normalizeCategory(rawGroup = '', channelName = '', channelUrl = 
   ) {
     return 'Deportes';
   }
+
+  if (/kids|infantil|anime|animation|animaci[oó]n|cartoon|nickelodeon|discovery kids|toons/i.test(`${rawGroup} ${channelName}`)) return 'Infantil y Anime';
 
   if (
     text.includes('movie') ||
@@ -116,6 +109,8 @@ export function normalizeCategory(rawGroup = '', channelName = '', channelUrl = 
     return 'Música';
   }
 
+  if (text.includes('pluto.tv') || text.includes('jmp2.uk/plu-') || text.includes('plutotv') || sourceName === 'Pluto TV') return 'Pluto TV 24/7';
+
   if (sourceName === 'Colombia' || text.includes('colombia')) return 'Colombia';
   if (sourceName === 'México' || text.includes('méxico') || text.includes('mexico')) return 'México';
   if (sourceName === 'Argentina' || text.includes('argentina')) return 'Argentina';
@@ -150,7 +145,8 @@ export function parseM3UContent(content = '', sourceInfo = {}) {
       const resolutionMatch = rawName.match(/\b(4K|2160p|1080p|720p|576p|480p)\b/i);
 
       const rawCategory = groupMatch ? groupMatch[1].trim() : '';
-      const countryCode = (countryMatch ? countryMatch[1].toLowerCase() : sourceInfo.country) || 'global';
+      const idCountry = /\.([a-z]{2})(?:@|$)/i.exec(idMatch?.[1] || '')?.[1]?.toLowerCase();
+      const countryCode = (countryMatch?.[1].split(/[;,]/)[0].toLowerCase() || idCountry || sourceInfo.country) || 'global';
 
       current = {
         id: idMatch ? idMatch[1] : `ch-${Math.random().toString(36).substring(2, 9)}`,
@@ -163,6 +159,8 @@ export function parseM3UContent(content = '', sourceInfo = {}) {
         source: sourceInfo.name || 'M3U',
         quality: resolutionMatch ? resolutionMatch[1].toUpperCase() : 'HD',
         isHevcHint,
+        isGeoBlocked: /geo-blocked/i.test(rawName),
+        isLimitedSchedule: /not 24\/7/i.test(rawName),
         userAgent: userAgentMatch ? userAgentMatch[1] : null,
         referrer: referrerMatch ? referrerMatch[1] : null,
         url: '',
@@ -250,17 +248,22 @@ export async function getAggregatedChannels(options = {}) {
     console.log('[IPTV Aggregator] Descargando y fusionando fuentes M3U en paralelo...');
 
     const fetchPromises = DEFAULT_M3U_SOURCES.map(async (src) => {
+      const saved = sourceChannelCache.get(src.url);
+      if (!forceRefresh && saved && now - saved.at < CACHE_TTL) return saved.channels;
       try {
         const res = await axios.get(src.url, {
-          timeout: 9000,
+          timeout: 15000,
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
           },
         });
-        return parseM3UContent(res.data, src);
+        const parsed = parseM3UContent(res.data, src);
+        if (!parsed.length) throw new Error('Lista sin canales');
+        sourceChannelCache.set(src.url, { channels: parsed, at: now });
+        return parsed;
       } catch (err) {
         console.warn(`[IPTV Aggregator] Fuente omitida (${src.name}):`, err.message);
-        return [];
+        return saved?.channels || [];
       }
     });
 
@@ -285,7 +288,7 @@ export async function getAggregatedChannels(options = {}) {
     merged.sort((a, b) => Number(Boolean(a.isHevcHint)) - Number(Boolean(b.isHevcHint)));
 
     aggregatedCache = merged;
-    lastCacheTime = now;
+    lastCacheTime = sourceChannelCache.size === DEFAULT_M3U_SOURCES.length ? now : now - CACHE_TTL + 60_000;
     baseChannels = merged;
     console.log(`[IPTV Aggregator] Fusión completada: ${baseChannels.length} canales únicos listos.`);
   }

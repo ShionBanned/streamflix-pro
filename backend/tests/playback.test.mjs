@@ -9,10 +9,88 @@ import { EventEmitter } from 'node:events';
 import { buildEmbedServers } from '../../shared/cloudProviders.mjs';
 import { readPlayerMessage, parseByteRange, shiftSubtitleCues, nextCloudMirror } from '../../shared/playerUtils.mjs';
 import { toWebVtt } from '../../shared/subtitleUtils.mjs';
-import { probeMirror } from '../services/cloudHealth.js';
+import { checkCloudHealth, probeMirror } from '../services/cloudHealth.js';
+import { validateSitePage, validateSiteTitle, parseSiteSearchResults, resolveSitePage, parseCuevanaServers, parseAnimeAv1Servers, getSiteServers, getResolvedSiteServers } from '../services/siteServers.js';
 import { parseMediaInfo, selectAudioTrack, probeMedia, streamFfmpeg, waitForTorrent } from '../services/mediaTools.js';
 import { hasGuaranteedBrowserAudio, isBrowserNativeCompatible } from '../services/torrentio.js';
-import { proxyStream } from '../services/iptvParser.js';
+import { proxyStream, parseM3UContent } from '../services/iptvParser.js';
+import { getContentRating } from '../../frontend/src/utils/contentRating.js';
+import { getCuratedChannelMix } from '../../frontend/src/utils/channelMix.js';
+
+test('IPTV parser attributes Colombian channels by tvg-id even in the global playlist', () => {
+  const playlist = '#EXTM3U\n#EXTINF:-1 tvg-id="CanalCapital.co@HD" group-title="General",Canal Capital (1080p)\nhttps://example.com/capital.m3u8\n#EXTINF:-1 tvg-id="AXNLatinAmerica.us@Andes" group-title="Movies",AXN Latin America\nhttps://example.com/axn.m3u8';
+  const channels = parseM3UContent(playlist, { name: 'Español Global', country: 'es-global' });
+  assert.deepEqual(channels.map(channel => channel.country), ['co', 'us']);
+});
+
+test('hero classification uses the title certification and hides missing ratings', () => {
+  const movie = { release_dates: { results: [{ iso_3166_1: 'US', release_dates: [{ certification: 'PG-13' }] }, { iso_3166_1: 'CO', release_dates: [{ certification: '12' }] }] } };
+  assert.equal(getContentRating(movie, 'movie'), '12+');
+  assert.equal(getContentRating({ content_ratings: { results: [{ iso_3166_1: 'US', rating: 'TV-MA' }] } }, 'tv'), 'TV-MA');
+  assert.equal(getContentRating({}, 'movie'), null);
+});
+
+test('curated channel variation includes only labeled themes and avoids blocked signals', () => {
+  const channels = [
+    { id: 'kids', url: 'https://example.com/kids', rawCategory: 'Animation', category: 'Infantil y Anime' },
+    { id: 'movie', url: 'https://example.com/movie', rawCategory: 'Movies', category: 'Películas y Series' },
+    { id: 'co', url: 'https://example.com/co', country: 'co', category: 'Colombia' },
+    { id: 'blocked', url: 'https://example.com/blocked', country: 'co', isGeoBlocked: true },
+    { id: 'random', url: 'https://example.com/random', rawCategory: 'Shopping', category: 'Entretenimiento' },
+  ];
+  const mix = getCuratedChannelMix(channels, '2026-11-16', 10);
+  assert.deepEqual(new Set(mix.map(channel => channel.id)), new Set(['kids', 'movie', 'co', 'random']));
+});
+
+test('site page URLs stay on the exact source domain and the expected content path', () => {
+  assert.equal(validateSitePage('cuevana', 'https://cuevana3w.pro/serie/ejemplo/episodio-1x2?ref=abc'), 'https://cuevana3w.pro/serie/ejemplo/episodio-1x2');
+  assert.equal(validateSitePage('animeav1', 'https://animeav1.com/media/ejemplo/6'), 'https://animeav1.com/media/ejemplo/6');
+  for (const url of ['http://cuevana3w.pro/pelicula/ejemplo', 'https://cuevana3w.pro.evil.test/pelicula/ejemplo', 'https://cuevana3w.pro@127.0.0.1/pelicula/ejemplo', 'https://cuevana3w.pro/admin']) assert.throws(() => validateSitePage('cuevana', url));
+});
+
+test('title discovery matches public catalogue pages and rejects arbitrary targets', () => {
+  const cuevana = parseSiteSearchResults('cuevana', '<a href="https://cuevana3t.pro/serie/mi-serie"><div class="item-detail"><p>Mi serie</p></div></a>', 'Mi serie');
+  assert.deepEqual(cuevana.map(item => [item.type, item.score]), [['tv', 1]]);
+  const anime = parseSiteSearchResults('animeav1', '<h3>Kyoufu Collector</h3></header><a href="/media/kyoufu-collector">', 'Kyoufu Collector');
+  assert.equal(anime[0].titleUrl, 'https://animeav1.com/media/kyoufu-collector');
+  for (const url of ['https://cuevana3t.pro.evil.test/serie/mi-serie', 'https://cuevana3t.pro/serie/mi-serie/episodio-1x1', 'http://cuevana3t.pro/serie/mi-serie']) assert.throws(() => validateSiteTitle('cuevana', url));
+});
+
+test('automatic episode resolution follows only the exact episode in the selected title', async () => {
+  const html = '<a href="https://cuevana3t.pro/serie/mi-serie/episodio-1x2">Episodio 2</a><a href="https://evil.test/serie/mi-serie/episodio-1x3">Episodio 3</a>';
+  const fetchImpl = async () => new Response(html, { headers: { 'content-type': 'text/html' } });
+  const result = await resolveSitePage('cuevana', 'https://cuevana3t.pro/serie/mi-serie', 1, 2, { fetchImpl });
+  assert.equal(result.pageUrl, 'https://cuevana3t.pro/serie/mi-serie/episodio-1x2');
+  await assert.rejects(resolveSitePage('cuevana', 'https://cuevana3t.pro/serie/mi-serie', 1, 3, { fetchImpl }), /no aparece/);
+  await assert.rejects(resolveSitePage('animeav1', 'https://animeav1.com/media/mi-serie', 2, 1, { fetchImpl }), /temporadas como títulos separados/);
+  const movieHtml = '<li data-server="https://player.example.com/embed/1">Latino</li>';
+  const movie = await getResolvedSiteServers('cuevana', 'https://cuevana3t.pro/pelicula/mi-pelicula', 1, 1, { fetchImpl: async () => new Response(movieHtml, { headers: { 'content-type': 'text/html' } }) });
+  assert.equal(movie.servers[0].languageCode, 'latino');
+});
+
+test('Cuevana categories decode their server URLs and keep the language as an unverified site label', () => {
+  const encoded = Buffer.from('https://vidlink.pro/movie/123').toString('base64');
+  const html = `<li data-server="https://tungtungsahur.cuevana3w.pro/?v=${encoded}"><span>VidLink Latino</span></li><li data-server="https://tungtungsahur.cuevana3w.pro/?token=abc">Hyper Subtitulado</li><li data-server="https://tungtungsahur.cuevana3w.pro/?v=${Buffer.from('http://127.0.0.1/private').toString('base64')}">Bad</li>`;
+  const servers = parseCuevanaServers(html);
+  assert.equal(servers.length, 2);
+  assert.equal(servers[0].url, 'https://vidlink.pro/movie/123');
+  assert.match(servers[0].audioLabel, /indicado por Cuevana/);
+  assert.match(servers[1].url, /token=abc/);
+});
+
+test('AnimeAV1 category reads embeds but never includes download links', () => {
+  const html = 'embeds:{SUB:[{server:"HLS",url:"https://player.zilla-networks.com/play/a"}],LAT:[{server:"Voe",url:"https://voe.sx/e/a"}]},downloads:{SUB:[{server:"Download",url:"https://example.com/file.mp4"}]}';
+  const servers = parseAnimeAv1Servers(html);
+  assert.deepEqual(servers.map(server => server.name), ['HLS', 'Voe']);
+  assert.match(servers[1].audioLabel, /Latino/);
+  assert(servers.every(server => !server.url.includes('example.com')));
+});
+
+test('site extraction rejects redirects and oversized pages before parsing', async () => {
+  const url = 'https://animeav1.com/media/ejemplo/1';
+  await assert.rejects(getSiteServers('animeav1', url, { fetchImpl: async () => new Response(null, { status: 302, headers: { location: 'https://other.test/' } }) }));
+  await assert.rejects(getSiteServers('animeav1', url, { fetchImpl: async () => new Response('', { headers: { 'content-type': 'text/html', 'content-length': '1000001' } }) }));
+});
 
 test('providers use validated IDs, never substitute an unrelated title, and deduplicate mirrors', () => {
   assert.deepEqual(buildEmbedServers({}), []); assert.deepEqual(buildEmbedServers({ tmdbId: '../550' }), []);
@@ -58,6 +136,7 @@ test('cloud diagnostics distinguish reachable pages, challenges, iframe blocks, 
   const mirror = { id: 'main', serverId: 'vidsrc', url: 'https://vidsrcme.ru/embed/movie/10' };
   const check = (response) => probeMirror(mirror, { fetchImpl: async () => response });
   assert.equal((await check(new Response('<html>player</html>'))).status, 'reachable');
+  assert.equal((await check(new Response('<html>This domain may be for sale.</html>'))).status, 'unavailable');
   assert.equal((await check(new Response('<html>Just a moment</html>'))).status, 'challenge');
   assert.equal((await check(new Response('blocked', { headers: { 'x-frame-options': 'SAMEORIGIN' } }))).status, 'frame-blocked');
   assert.equal((await check(new Response('not found', { status: 404 }))).status, 'unavailable');
@@ -66,6 +145,14 @@ test('cloud diagnostics distinguish reachable pages, challenges, iframe blocks, 
     const result = await probeMirror(mirror, { fetchImpl: async () => { throw Object.assign(new Error(), { cause: { code } }); } });
     assert.equal(result.status, status); assert.equal(result.playbackVerified, false);
   }
+});
+
+test('selected mirror preflight checks one configured page without probing the full catalog', async () => {
+  let requests = 0;
+  const result = await checkCloudHealth({ tmdbId: 1, serverId: 'vidsrc', mirrorId: 'me-ru' }, { fetchImpl: async () => { requests++; return new Response('<html>player</html>'); } });
+  assert.equal(requests, 1);
+  assert.equal(result.results.length, 1);
+  assert.equal(result.results[0].mirrorId, 'me-ru');
 });
 
 test('media metadata selects a real audio track by language or explicit manual index', () => {

@@ -34,7 +34,7 @@ export async function probeMirror(mirror, { fetchImpl = fetch, timeoutMs = 6000 
         } finally { await reader.cancel(); }
       }
       if (/just a moment|checking your browser|attention required|cf-chl-|verify you are human/i.test(sample)) return finish('challenge', 'La página exige una verificación web.', response.status);
-      if (/domain (?:is )?for sale|buy this domain|domain has expired|sedo\.com/i.test(sample)) return finish('unavailable', 'El dominio muestra una página de venta o vencimiento.', response.status);
+      if (/domain (?:is |may be )?for sale|buy this domain|domain has expired|sedo\.com/i.test(sample)) return finish('unavailable', 'El dominio muestra una página de venta o vencimiento.', response.status);
       return finish('reachable', 'La página responde; el inicio del video todavía debe confirmarse en el reproductor.', response.status);
     }
     return finish('unavailable', 'Demasiadas redirecciones.');
@@ -47,7 +47,7 @@ export async function probeMirror(mirror, { fetchImpl = fetch, timeoutMs = 6000 
 
 export async function checkCloudHealth(params, options = {}) {
   const servers = buildEmbedServers(params);
-  const mirrors = servers.flatMap(server => server.mirrors.filter(mirror => !params.serverId || server.id === params.serverId).map(mirror => ({ ...mirror, serverId: server.id })));
+  const mirrors = servers.flatMap(server => server.mirrors.filter(mirror => (!params.serverId || server.id === params.serverId) && (!params.mirrorId || mirror.id === params.mirrorId)).map(mirror => ({ ...mirror, serverId: server.id })));
   let index = 0; const results = [];
   await Promise.all(Array.from({ length: Math.min(5, mirrors.length) }, async () => {
     while (index < mirrors.length) {

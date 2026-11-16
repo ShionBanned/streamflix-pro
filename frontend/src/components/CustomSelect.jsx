@@ -142,7 +142,7 @@ export default function CustomSelect({
   return (
     <div
       ref={containerRef}
-      className={`relative inline-block text-left select-none font-netflix ${className}`}
+      className={`relative inline-block text-left select-none font-netflix ${isOpen ? 'z-[60]' : ''} ${className}`}
     >
       <button
         type="button"
@@ -183,7 +183,7 @@ export default function CustomSelect({
 
       {isOpen && (
         <div
-          className={`absolute z-50 mt-2 min-w-[230px] w-max max-w-[90vw] bg-[#121212]/98 backdrop-blur-3xl border border-white/15 ring-1 ring-[#E50914]/30 rounded-2xl shadow-[0_24px_65px_rgba(0,0,0,0.95)] p-1.5 animate-fadeIn ${
+          className={`absolute z-[70] mt-2 min-w-[230px] w-max max-w-[90vw] bg-[#101010] border border-white/20 ring-1 ring-[#E50914]/30 rounded-2xl shadow-[0_24px_65px_rgba(0,0,0,0.95)] p-1.5 animate-fadeIn ${
             align === 'right' ? 'right-0' : 'left-0'
           } ${menuClassName}`}
         >

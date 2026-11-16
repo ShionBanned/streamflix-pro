@@ -9,6 +9,8 @@ import SmartPlayer from './components/SmartPlayer.jsx';
 import LiveTV from './components/LiveTV.jsx';
 import BrandLogo from './components/BrandLogo.jsx';
 import CustomSelect from './components/CustomSelect.jsx';
+import ProfilePage from './components/ProfilePage.jsx';
+import DiscoveryRows, { buildGenreRows } from './components/DiscoveryRows.jsx';
 import useUserMedia, { computePersonalizedPool } from './hooks/useUserMedia.js';
 import {
   Film,
@@ -123,6 +125,12 @@ const MOVIE_GENRES = [
     icon: '⚔️',
     description: 'Grandes batallas históricas y epopeyas basadas en hechos reales',
   },
+  { id: '10751', value: '10751', label: 'Cine familiar', icon: '👨‍👩‍👧', description: 'Aventuras y comedias para ver en familia' },
+  { id: '99', value: '99', label: 'Documentales', icon: '🎥', description: 'Historias y personas reales' },
+  { id: '36', value: '36', label: 'Historia', icon: '🏛️', description: 'Relatos y acontecimientos históricos' },
+  { id: '37', value: '37', label: 'Western', icon: '🤠', description: 'Historias del viejo oeste' },
+  { id: '10402', value: '10402', label: 'Música y musicales', icon: '🎶', description: 'Conciertos, artistas y musicales' },
+  { id: '10770', value: '10770', label: 'Películas para TV', icon: '📺', description: 'Producciones originales para televisión' },
 ];
 
 // Géneros personalizados estilo Netflix para SERIES
@@ -207,6 +215,11 @@ const SERIES_GENRES = [
     icon: '📹',
     description: 'Investigaciones reales, crímenes verídicos y naturaleza',
   },
+  { id: '10762', value: '10762', label: 'Series infantiles', icon: '🧸', description: 'Historias para los más pequeños' },
+  { id: '10766', value: '10766', label: 'Telenovelas', icon: '💐', description: 'Historias largas y personajes inolvidables' },
+  { id: '10767', value: '10767', label: 'Talk shows', icon: '🎙️', description: 'Entrevistas, humor y conversación' },
+  { id: '10763', value: '10763', label: 'Actualidad', icon: '📰', description: 'Informativos y programas de actualidad' },
+  { id: '37', value: '37', label: 'Western', icon: '🤠', description: 'Series ambientadas en el oeste' },
 ];
 
 // Géneros personalizados estilo Netflix/Crunchyroll para ANIME
@@ -270,6 +283,9 @@ const ANIME_GENRES = [
     icon: '🏯',
     description: 'Samuráis, guerra, superación y relatos conmovedores',
   },
+  { id: '16,10751', value: '16,10751', label: 'Anime para toda la familia', icon: '🌈', description: 'Aventuras animadas para disfrutar juntos' },
+  { id: '16,12', value: '16,12', label: 'Viajes y aventuras', icon: '🗺️', description: 'Mundos por descubrir y grandes viajes' },
+  { id: '16,99', value: '16,99', label: 'Documental animado', icon: '🎞️', description: 'Historias reales contadas con animación' },
 ];
 
 const SORT_OPTIONS = [
@@ -287,34 +303,16 @@ const TV_NETWORKS = [
   { id: '2552', value: '2552', label: 'Apple TV+', icon: '🍎' },
 ];
 
-/**
- * Garantiza que ninguna fila de categoría quede vacía jamás:
- * Si la sección de la API aún no tiene suficientes títulos, filtra y mezcla pasivamente
- * desde el catálogo general cargado en memoria.
- */
+/** Completa las filas solo con títulos que coincidan con la etiqueta de género. */
 function ensureRowItems(sectionItems = [], fallbackPool = [], genreIds = [], sliceStart = 0) {
-  if (Array.isArray(sectionItems) && sectionItems.length >= 6) {
-    return sectionItems;
-  }
   const existing = Array.isArray(sectionItems) ? sectionItems : [];
   const seen = new Set(existing.map((i) => i?.id));
   const out = [...existing];
-
-  if (genreIds.length > 0) {
-    for (const item of fallbackPool) {
-      if (!item?.id || seen.has(item.id)) continue;
-      if (
-        Array.isArray(item.genre_ids) &&
-        item.genre_ids.some((gid) => genreIds.includes(Number(gid)))
-      ) {
-        seen.add(item.id);
-        out.push(item);
-      }
-    }
-  }
-
-  for (const item of fallbackPool.slice(sliceStart)) {
-    if (out.length >= 18) break;
+  const candidates = genreIds.length
+    ? fallbackPool.filter((item) => Array.isArray(item.genre_ids) && item.genre_ids.some((gid) => genreIds.includes(Number(gid))))
+    : fallbackPool.slice(sliceStart);
+  for (const item of candidates) {
+    if (out.length >= 30) break;
     if (item?.id && !seen.has(item.id)) {
       seen.add(item.id);
       out.push(item);
@@ -326,6 +324,11 @@ function ensureRowItems(sectionItems = [], fallbackPool = [], genreIds = [], sli
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('home');
+  const [profile, setProfile] = useState(() => {
+    try { return { name: 'Mi Perfil', avatar: '🎬', photo: '', movieGenres: [], seriesGenres: [], autoplayTrailers: true, ...JSON.parse(localStorage.getItem('streamflix_profile_v1') || '{}') }; }
+    catch { return { name: 'Mi Perfil', avatar: '🎬', photo: '', movieGenres: [], seriesGenres: [], autoplayTrailers: true }; }
+  });
+  const saveProfile = (next) => { localStorage.setItem('streamflix_profile_v1', JSON.stringify(next)); setProfile(next); };
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [searching, setSearching] = useState(false);
@@ -366,6 +369,9 @@ export default function App() {
   const [selectedSortBy, setSelectedSortBy] = useState('popularity.desc');
   const [filteredItems, setFilteredItems] = useState([]);
   const [loadingFilter, setLoadingFilter] = useState(false);
+  const [filteredPage, setFilteredPage] = useState(3);
+  const [hasMoreFiltered, setHasMoreFiltered] = useState(false);
+  const [loadingMoreFiltered, setLoadingMoreFiltered] = useState(false);
 
   // Hubs de Plataformas
   const [activeHub, setActiveHub] = useState(null);
@@ -377,6 +383,15 @@ export default function App() {
   const [playerConfig, setPlayerConfig] = useState(null);
 
   const tmdbLang = currentLanguageObj?.tmdbLang || 'es-MX';
+  const preferredGenreIds = [...new Set([...(profile.movieGenres || []), ...(profile.seriesGenres || [])])];
+  const movieRowSpecs = useMemo(() => buildGenreRows(MOVIE_GENRES, 'movie', { preferredGenreIds: profile.movieGenres || [], limit: 40 }), [profile]);
+  const seriesRowSpecs = useMemo(() => buildGenreRows(SERIES_GENRES, 'tv', { preferredGenreIds: profile.seriesGenres || [], limit: 40 }), [profile]);
+  const animeRowSpecs = useMemo(() => buildGenreRows(ANIME_GENRES, 'tv', { originalLanguage: 'ja', limit: 42 }), []);
+  const homeRowSpecs = useMemo(() => {
+    const movies = buildGenreRows(MOVIE_GENRES, 'movie', { preferredGenreIds: profile.movieGenres || [], limit: 21 });
+    const series = buildGenreRows(SERIES_GENRES, 'tv', { preferredGenreIds: profile.seriesGenres || [], limit: 20 });
+    return Array.from({ length: 21 }, (_, index) => [movies[index], series[index]]).flat().filter(Boolean);
+  }, [profile]);
 
   const loadCatalogs = useCallback(async () => {
     setLoadingCatalog(true);
@@ -432,6 +447,7 @@ export default function App() {
 
     if (!isFilterActive) {
       setFilteredItems([]);
+      setHasMoreFiltered(false);
       return;
     }
 
@@ -443,33 +459,19 @@ export default function App() {
     const genreParam =
       activeTab === 'anime' && selectedGenre === 'all' ? '16' : selectedGenre;
 
-    api
-      .discoverCatalog({
-        type,
-        genre: genreParam,
-        network: selectedNetwork,
-        originalLanguage,
-        sortBy: selectedSortBy,
-        lang: tmdbLang,
-      })
-      .then((res) => {
+    Promise.all([1, 2, 3].map((page) => api.discoverCatalog({
+      type, genre: genreParam, network: selectedNetwork, originalLanguage,
+      sortBy: selectedSortBy, page, lang: tmdbLang,
+    })))
+      .then((pages) => {
         if (!isMounted) return;
-        if (res && res.length > 0) {
-          setFilteredItems(res);
-        } else {
-          // Respaldo instantáneo desde el pool cargado si la red tardó
-          const fallbackPool =
-            activeTab === 'anime'
-              ? animeCatalog
-              : activeTab === 'series'
-              ? popularSeries
-              : [...popularMovies, ...nowPlaying, ...topRated];
-          setFilteredItems(fallbackPool);
-        }
+        setFilteredItems([...new Map(pages.flat().filter((item) => item?.id).map((item) => [item.id, item])).values()]);
+        setFilteredPage(3);
+        setHasMoreFiltered(pages[2].length > 0);
         setLoadingFilter(false);
       })
       .catch(() => {
-        if (isMounted) setLoadingFilter(false);
+        if (isMounted) { setLoadingFilter(false); setHasMoreFiltered(false); }
       });
 
     return () => {
@@ -481,12 +483,21 @@ export default function App() {
     selectedNetwork,
     selectedSortBy,
     tmdbLang,
-    animeCatalog,
-    popularSeries,
-    popularMovies,
-    nowPlaying,
-    topRated,
   ]);
+
+  const loadMoreFiltered = async () => {
+    if (loadingMoreFiltered || !hasMoreFiltered) return;
+    const page = filteredPage + 1;
+    setLoadingMoreFiltered(true);
+    try {
+      const type = activeTab === 'series' || activeTab === 'anime' ? 'tv' : 'movie';
+      const genre = activeTab === 'anime' && selectedGenre === 'all' ? '16' : selectedGenre;
+      const next = await api.discoverCatalog({ type, genre, network: selectedNetwork, originalLanguage: activeTab === 'anime' ? 'ja' : null, sortBy: selectedSortBy, page, lang: tmdbLang });
+      setFilteredItems((current) => [...new Map([...current, ...next].filter((item) => item?.id).map((item) => [item.id, item])).values()]);
+      setFilteredPage(page);
+      setHasMoreFiltered(next.length > 0 && page < 25);
+    } finally { setLoadingMoreFiltered(false); }
+  };
 
   useEffect(() => {
     if (!activeHub) {
@@ -611,10 +622,11 @@ export default function App() {
       tasteHistory,
       nowPlaying,
       trending,
+      preferredGenreIds,
       sectionItems: [...nowPlaying.slice(0, 6), ...trending.slice(0, 8)],
       maxItems: 8,
     });
-  }, [continueWatching, watchlist, tasteHistory, nowPlaying, trending]);
+  }, [continueWatching, watchlist, tasteHistory, nowPlaying, trending, profile]);
 
   const moviesHeroPool = useMemo(() => {
     return computePersonalizedPool({
@@ -623,6 +635,7 @@ export default function App() {
       tasteHistory,
       nowPlaying,
       trending: popularMovies,
+      preferredGenreIds: profile.movieGenres || [],
       sectionItems: [
         ...nowPlaying.slice(0, 6),
         ...popularMovies.slice(0, 6),
@@ -630,7 +643,7 @@ export default function App() {
       ],
       maxItems: 8,
     });
-  }, [continueWatching, watchlist, tasteHistory, nowPlaying, popularMovies, topRated]);
+  }, [continueWatching, watchlist, tasteHistory, nowPlaying, popularMovies, topRated, profile]);
 
   const seriesHeroPool = useMemo(() => {
     return computePersonalizedPool({
@@ -639,13 +652,14 @@ export default function App() {
       tasteHistory,
       nowPlaying: [],
       trending: popularSeries,
+      preferredGenreIds: profile.seriesGenres || [],
       sectionItems: [
         ...popularSeries.slice(0, 8),
         ...(seriesSections.topRated || []).slice(0, 6),
       ],
       maxItems: 8,
     });
-  }, [continueWatching, watchlist, tasteHistory, popularSeries, seriesSections.topRated]);
+  }, [continueWatching, watchlist, tasteHistory, popularSeries, seriesSections.topRated, profile]);
 
   const animeHeroPool = useMemo(() => {
     return computePersonalizedPool({
@@ -654,13 +668,14 @@ export default function App() {
       tasteHistory,
       nowPlaying: animeSections.animeMovies || [],
       trending: animeCatalog,
+      preferredGenreIds: profile.seriesGenres || [],
       sectionItems: [
         ...animeCatalog.slice(0, 8),
         ...(animeSections.shonenAction || []).slice(0, 6),
       ],
       maxItems: 8,
     });
-  }, [continueWatching, watchlist, tasteHistory, animeCatalog, animeSections]);
+  }, [continueWatching, watchlist, tasteHistory, animeCatalog, animeSections, profile]);
 
   const personalizedRowItems = useMemo(() => {
     return computePersonalizedPool({
@@ -669,10 +684,11 @@ export default function App() {
       tasteHistory,
       nowPlaying,
       trending: [...trending, ...popularMovies, ...popularSeries],
+      preferredGenreIds,
       sectionItems: [...nowPlaying, ...trending],
       maxItems: 16,
     });
-  }, [continueWatching, watchlist, tasteHistory, nowPlaying, trending, popularMovies, popularSeries]);
+  }, [continueWatching, watchlist, tasteHistory, nowPlaying, trending, popularMovies, popularSeries, profile]);
 
   const hasActiveFilters =
     selectedGenre !== 'all' ||
@@ -688,6 +704,7 @@ export default function App() {
         : MOVIE_GENRES;
     return list.find((g) => g.value === selectedGenre)?.label || 'Explorando Género';
   }, [activeTab, selectedGenre]);
+  const expandedMediaProps = { onSelectDetails: handleSelectDetails, onPlay: handlePlay, onToggleWatchlist: toggleWatchlist, isSavedInWatchlist: isInWatchlist, getSavedEntry, preferredLanguage };
 
   return (
     <div className="min-h-screen bg-[#141414] text-white flex flex-col font-netflix select-none">
@@ -708,11 +725,14 @@ export default function App() {
         audioEnginePreset={audioEnginePreset}
         onChangeAudioPreset={setAudioEnginePreset}
         onSurpriseMe={handleSurpriseMe}
+        profile={profile}
       />
 
       <main className="flex-1 pb-20">
         {activeTab === 'live_tv' ? (
           <LiveTV />
+        ) : activeTab === 'profile' ? (
+          <ProfilePage profile={profile} onSave={saveProfile} movieGenres={MOVIE_GENRES} seriesGenres={SERIES_GENRES} preferredLanguage={preferredLanguage} onChangeLanguage={setPreferredLanguage} audioEnginePreset={audioEnginePreset} onChangeAudioPreset={setAudioEnginePreset} />
         ) : activeTab === 'watchlist' ? (
           <div className="pt-24 sm:pt-28 px-4 sm:px-8 lg:px-12 max-w-[1480px] mx-auto animate-fadeIn">
             <h1 className="text-3xl font-black mb-2 flex items-center gap-3">
@@ -756,6 +776,7 @@ export default function App() {
                 isSavedInWatchlist={isInWatchlist}
                 preferredLanguage={preferredLanguage}
                 onChangeLanguage={setPreferredLanguage}
+                enableTrailer={profile.autoplayTrailers !== false}
               />
             )}
 
@@ -834,6 +855,8 @@ export default function App() {
                 subtitle="Catálogo de anime con episodios completos y películas"
                 items={filteredItems}
                 isLoading={loadingFilter}
+                onLoadMore={hasMoreFiltered ? loadMoreFiltered : null}
+                isLoadingMore={loadingMoreFiltered}
                 onRetry={() => {
                   setSelectedGenre('all');
                   setSelectedSortBy('popularity.desc');
@@ -951,6 +974,7 @@ export default function App() {
                   getSavedEntry={getSavedEntry}
                   preferredLanguage={preferredLanguage}
                 />
+                <DiscoveryRows specs={animeRowSpecs} lang={tmdbLang} mediaProps={expandedMediaProps} />
               </>
             )}
           </div>
@@ -996,6 +1020,7 @@ export default function App() {
                 isSavedInWatchlist={isInWatchlist}
                 preferredLanguage={preferredLanguage}
                 onChangeLanguage={setPreferredLanguage}
+                enableTrailer={profile.autoplayTrailers !== false}
               />
             )}
 
@@ -1071,6 +1096,8 @@ export default function App() {
                 subtitle="Selección curada en alta definición con audio preparado"
                 items={filteredItems}
                 isLoading={loadingFilter}
+                onLoadMore={hasMoreFiltered ? loadMoreFiltered : null}
+                isLoadingMore={loadingMoreFiltered}
                 onRetry={() => {
                   setSelectedGenre('all');
                   setSelectedSortBy('popularity.desc');
@@ -1198,6 +1225,7 @@ export default function App() {
                   getSavedEntry={getSavedEntry}
                   preferredLanguage={preferredLanguage}
                 />
+                <DiscoveryRows specs={movieRowSpecs} lang={tmdbLang} mediaProps={expandedMediaProps} />
               </>
             )}
           </div>
@@ -1214,6 +1242,7 @@ export default function App() {
                 isSavedInWatchlist={isInWatchlist}
                 preferredLanguage={preferredLanguage}
                 onChangeLanguage={setPreferredLanguage}
+                enableTrailer={profile.autoplayTrailers !== false}
               />
             )}
 
@@ -1297,6 +1326,8 @@ export default function App() {
                 subtitle="Temporadas completas listas para maratonear"
                 items={filteredItems}
                 isLoading={loadingFilter}
+                onLoadMore={hasMoreFiltered ? loadMoreFiltered : null}
+                isLoadingMore={loadingMoreFiltered}
                 onRetry={() => {
                   setSelectedGenre('all');
                   setSelectedNetwork('all');
@@ -1422,6 +1453,7 @@ export default function App() {
                   getSavedEntry={getSavedEntry}
                   preferredLanguage={preferredLanguage}
                 />
+                <DiscoveryRows specs={seriesRowSpecs} lang={tmdbLang} mediaProps={expandedMediaProps} />
               </>
             )}
           </div>
@@ -1437,6 +1469,7 @@ export default function App() {
                 isSavedInWatchlist={isInWatchlist}
                 preferredLanguage={preferredLanguage}
                 onChangeLanguage={setPreferredLanguage}
+                enableTrailer={profile.autoplayTrailers !== false}
               />
             ) : loadingCatalog ? (
               <div className="w-full h-[78vh] netflix-shimmer flex items-center justify-center pt-20">
@@ -1588,6 +1621,7 @@ export default function App() {
                 getSavedEntry={getSavedEntry}
                 preferredLanguage={preferredLanguage}
               />
+              <DiscoveryRows specs={homeRowSpecs} lang={tmdbLang} mediaProps={expandedMediaProps} />
             </div>
           </>
         )}

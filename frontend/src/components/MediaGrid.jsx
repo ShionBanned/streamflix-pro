@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import api from '../services/api.js';
 import {
   Star,
@@ -28,10 +28,25 @@ export default function MediaGrid({
   isSavedInWatchlist = null,
   getSavedEntry = null,
   onRetry = null,
+  onLoadMore = null,
+  isLoadingMore = false,
   preferredLanguage = 'latino',
 }) {
   const scrollRef = useRef(null);
+  const sectionRef = useRef(null);
   const [isScrollingAnim, setIsScrollingAnim] = useState(false);
+  const [isVisible, setIsVisible] = useState(false);
+
+  useEffect(() => {
+    const element = sectionRef.current;
+    if (!element) return;
+    if (!('IntersectionObserver' in window)) { setIsVisible(true); return; }
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) { setIsVisible(true); observer.disconnect(); }
+    }, { rootMargin: '0px 0px 80px 0px', threshold: 0.05 });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [isLoading, items?.length]);
 
   const currentLang =
     LANGUAGE_OPTIONS.find((l) => l.id === preferredLanguage) || LANGUAGE_OPTIONS[0];
@@ -39,7 +54,7 @@ export default function MediaGrid({
   const scroll = (direction) => {
     if (scrollRef.current) {
       setIsScrollingAnim(true);
-      const scrollAmount = direction === 'left' ? -780 : 780;
+      const scrollAmount = Math.round(scrollRef.current.clientWidth * 0.85) * (direction === 'left' ? -1 : 1);
       scrollRef.current.scrollBy({ left: scrollAmount, behavior: 'smooth' });
       setTimeout(() => setIsScrollingAnim(false), 420);
     }
@@ -63,7 +78,7 @@ export default function MediaGrid({
                 isContinueWatching
                   ? 'w-64 sm:w-72 aspect-video'
                   : isRow || isTop10
-                  ? 'w-40 sm:w-48 aspect-[2/3]'
+                  ? isTop10 ? 'w-40 sm:w-48 aspect-[2/3]' : 'w-64 sm:w-72 aspect-video'
                   : 'w-full aspect-[2/3]'
               }`}
             />
@@ -111,19 +126,19 @@ export default function MediaGrid({
   };
 
   return (
-    <div className="relative group/row py-3.5 px-4 sm:px-8 lg:px-12 max-w-[1480px] mx-auto animate-rowReveal">
+    <div ref={sectionRef} className={`relative group/row py-4 px-4 sm:px-8 lg:px-12 max-w-[1480px] mx-auto catalog-row ${isVisible ? 'is-visible' : ''}`}>
       {title && (
         <div className="flex items-end justify-between mb-3">
           <div>
             <h2 className="text-lg sm:text-2xl font-extrabold text-white tracking-tight flex items-center gap-2.5">
               <span className="w-1.5 h-5 bg-[#E50914] rounded-full inline-block shadow-[0_0_8px_#E50914]" />
-              <span>{title}</span>
+              <span>{title.replace(/^[^\p{L}\p{N}]+/u, '')}</span>
             </h2>
             {subtitle && (
               <p className="text-xs text-neutral-400 mt-0.5 ml-4">{subtitle}</p>
             )}
           </div>
-          <span className="text-[11px] text-neutral-500 font-semibold">
+          <span className="hidden sm:inline text-[11px] text-neutral-500 font-semibold">
             {displayItems.length} títulos
           </span>
         </div>
@@ -133,12 +148,14 @@ export default function MediaGrid({
         <>
           <button
             onClick={() => scroll('left')}
+            aria-label={`Desplazar ${title} a la izquierda`}
             className="hidden md:flex absolute left-1 top-1/2 z-30 w-11 h-32 -translate-y-1/2 bg-black/80 hover:bg-[#E50914] text-white rounded-r-2xl items-center justify-center opacity-0 group-hover/row:opacity-100 transition-all duration-300 hover:scale-105 border-y border-r border-white/15 backdrop-blur-md shadow-2xl"
           >
             <ChevronLeft className="w-7 h-7" />
           </button>
           <button
             onClick={() => scroll('right')}
+            aria-label={`Desplazar ${title} a la derecha`}
             className="hidden md:flex absolute right-1 top-1/2 z-30 w-11 h-32 -translate-y-1/2 bg-black/80 hover:bg-[#E50914] text-white rounded-l-2xl items-center justify-center opacity-0 group-hover/row:opacity-100 transition-all duration-300 hover:scale-105 border-y border-l border-white/15 backdrop-blur-md shadow-2xl"
           >
             <ChevronRight className="w-7 h-7" />
@@ -266,6 +283,7 @@ export default function MediaGrid({
             (item.poster_path
               ? `https://image.tmdb.org/t/p/w342${item.poster_path}`
               : 'https://images.unsplash.com/photo-1594909122845-11baa439b7bf?q=80&w=500&auto=format&fit=crop');
+          const cardImage = isRow ? (item.backdrop_url || (item.backdrop_path ? `https://image.tmdb.org/t/p/w780${item.backdrop_path}` : null) || posterUrl) : posterUrl;
 
           const inWatchlist = isSavedInWatchlist ? isSavedInWatchlist(itemId) : false;
 
@@ -349,17 +367,17 @@ export default function MediaGrid({
             <div
               key={`${itemId}-${index}`}
               onMouseEnter={() => api.prefetchTitle(item, currentLang.tmdbLang)}
-              className={`group relative flex-shrink-0 cursor-pointer rounded-xl overflow-hidden bg-[#161616] border border-white/[0.07] netflix-card-transition ${
-                isRow ? 'w-40 sm:w-48' : 'w-full'
+              className={`group relative flex-shrink-0 cursor-pointer rounded-md overflow-hidden bg-[#161616] border border-white/[0.06] netflix-card-transition focus-within:ring-2 focus-within:ring-white/80 ${
+                isRow ? 'w-64 sm:w-72' : 'w-full'
               }`}
               onClick={() => onSelectDetails(item)}
             >
-              <div className="aspect-[2/3] w-full overflow-hidden relative bg-neutral-900">
+              <div className={`${isRow ? 'aspect-video' : 'aspect-[2/3]'} w-full overflow-hidden relative bg-neutral-900`}>
                 <img
-                  src={posterUrl}
+                  src={cardImage}
                   alt={itemTitle}
                   loading="lazy"
-                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.04]"
                 />
 
                 {rating && (
@@ -388,7 +406,7 @@ export default function MediaGrid({
                   </div>
                 )}
 
-                <div className="absolute inset-0 bg-gradient-to-t from-[#141414] via-black/55 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-3">
+                <div className="absolute inset-0 bg-gradient-to-t from-black via-black/50 to-transparent opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-3">
                   <div className="flex items-center gap-2 mb-2.5">
                     <button
                       onClick={(e) => {
@@ -448,10 +466,7 @@ export default function MediaGrid({
                       {savedEntry ? `En ${formatMinsSec(savedEntry.currentTime)}` : `${matchScore}% para ti`}
                     </span>
                     <span className="text-neutral-500">•</span>
-                    <span className="px-1 border border-white/25 rounded text-[9px] text-neutral-200 font-bold">
-                      Fuente
-                    </span>
-                    <span className="text-neutral-300">{currentLang.flag}</span>
+                    <span className="text-neutral-300">{releaseYear || 'Destacado'}</span>
                   </div>
                 </div>
               </div>
@@ -462,16 +477,14 @@ export default function MediaGrid({
                 </h3>
                 <div className="flex items-center justify-between text-[11px] text-neutral-400 mt-1">
                   <span>{releaseYear || 'Destacado'}</span>
-                  <span className="text-[10px] text-neutral-300 font-medium flex items-center gap-1">
-                    <span>{currentLang.flag}</span>
-                    <span>{currentLang.shortLabel}</span>
-                  </span>
+                  <span className="text-[10px] text-neutral-400 font-medium">{isTv ? 'Serie' : 'Película'}</span>
                 </div>
               </div>
             </div>
           );
         })}
       </div>
+      {onLoadMore && !isRow && !isTop10 && !isContinueWatching && <div className="flex justify-center pt-5 pb-2"><button type="button" onClick={onLoadMore} disabled={isLoadingMore} className="rounded-md border border-white/25 bg-[#262626] px-6 py-2.5 text-sm font-bold text-white hover:bg-[#393939] disabled:opacity-50">{isLoadingMore ? 'Cargando más títulos…' : 'Ver más títulos'}</button></div>}
     </div>
   );
 }

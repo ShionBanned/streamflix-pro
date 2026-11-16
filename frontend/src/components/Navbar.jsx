@@ -28,6 +28,7 @@ export default function Navbar({
   audioEnginePreset = 'latino-aac',
   onChangeAudioPreset = null,
   onSurpriseMe = null,
+  profile = null,
 }) {
   const [isScrolled, setIsScrolled] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -315,14 +316,15 @@ export default function Navbar({
 
           {/* Notificación + Avatar de Perfil Estilo Netflix */}
           <div className="hidden sm:flex items-center gap-3 pl-1">
-            <Bell className="w-4 h-4 text-neutral-300 hover:text-white cursor-pointer transition" />
-            <div
-              onClick={() => setActiveTab('watchlist')}
-              title="Mi Lista y Perfil"
-              className="w-8 h-8 rounded bg-gradient-to-br from-[#E50914] to-[#8c060d] flex items-center justify-center text-white font-black text-xs shadow-md border border-white/20 cursor-pointer hover:scale-105 transition"
+            <button
+              type="button"
+              onClick={() => setActiveTab('profile')}
+              aria-label="Abrir Mi Perfil"
+              title={profile?.name || 'Mi Perfil'}
+              className="w-9 h-9 rounded bg-gradient-to-br from-[#E50914] to-[#8c060d] flex items-center justify-center text-white font-black text-lg shadow-md border border-white/20 cursor-pointer hover:scale-105 transition overflow-hidden"
             >
-              SF
-            </div>
+              {profile?.photo ? <img src={profile.photo} alt="" className="w-full h-full object-cover" /> : profile?.avatar || '🎬'}
+            </button>
           </div>
         </div>
       </div>
@@ -351,6 +353,7 @@ export default function Navbar({
             </button>
           );
         })}
+        <button type="button" onClick={() => setActiveTab('profile')} className={`py-2 px-2.5 text-xs font-bold whitespace-nowrap ${activeTab === 'profile' ? 'text-white border-b-2 border-[#E50914]' : 'text-neutral-400'}`}>Mi Perfil</button>
       </nav>
     </header>
   );

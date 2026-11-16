@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import api from '../services/api.js';
 import Hls from 'hls.js';
 import CustomSelect from './CustomSelect.jsx';
+import { getCuratedChannelMix } from '../utils/channelMix.js';
 import {
   Radio,
   Search,
@@ -153,7 +154,7 @@ function NetflixChannelCard({
       onClick={() => onSelect(channel)}
       className={`group relative ${
         isFixedWidth ? 'w-64 sm:w-72 shrink-0' : 'w-full'
-      } rounded-2xl overflow-hidden bg-gradient-to-br ${themeClass} border cursor-pointer select-none netflix-card-transition ${
+      } rounded-md overflow-hidden bg-gradient-to-br ${themeClass} border cursor-pointer select-none netflix-card-transition ${
         isActive
           ? 'ring-2 ring-[#E50914] border-[#E50914] shadow-[0_14px_38px_rgba(229,9,20,0.35)]'
           : 'hover:border-white/30'
@@ -162,7 +163,7 @@ function NetflixChannelCard({
       {/* Lienzo 16:9 Estilo Netflix */}
       <div className="aspect-video w-full relative p-4 flex flex-col justify-between overflow-hidden">
         {/* Resplandor ambiental decorativo */}
-        <div className="absolute -right-10 -top-10 w-32 h-32 rounded-full bg-[#E50914]/10 blur-2xl pointer-events-none group-hover:bg-[#E50914]/25 transition-all duration-500" />
+        <div className="absolute -right-10 -top-10 w-32 h-32 rounded-full bg-white/5 blur-2xl pointer-events-none" />
 
         {/* Fila Superior: Insignia DIRECTO + Botón Favorito */}
         <div className="relative z-10 flex items-center justify-between gap-2">
@@ -192,7 +193,7 @@ function NetflixChannelCard({
 
         {/* Centro: Logo del Canal en Alta Definición */}
         <div className="relative z-10 my-auto flex items-center justify-center py-1">
-          <div className="w-20 h-14 sm:w-24 sm:h-16 rounded-xl bg-black/55 backdrop-blur-md border border-white/10 p-2 flex items-center justify-center shadow-xl group-hover:scale-110 transition-transform duration-300">
+          <div className="w-20 h-14 sm:w-24 sm:h-16 rounded-md bg-black/55 backdrop-blur-md border border-white/10 p-2 flex items-center justify-center shadow-xl group-hover:scale-105 transition-transform duration-300">
             <img
               src={channel.logo}
               alt={channel.name}
@@ -220,7 +221,7 @@ function NetflixChannelCard({
             <span className="truncate">
               {channel.category} • {channel.countryName || 'Global'}
             </span>
-            <span className="font-bold text-emerald-400 shrink-0 ml-2">HD</span>
+            <span className="font-bold text-neutral-400 shrink-0 ml-2">TV</span>
           </div>
         </div>
 
@@ -255,6 +256,8 @@ function ChannelRowCarousel({
   onSelectChannel,
   onToggleFavorite,
   isFavorite,
+  maxItems = 40,
+  onViewAll = null,
 }) {
   const rowRef = useRef(null);
   const [scrolling, setScrolling] = useState(false);
@@ -265,7 +268,7 @@ function ChannelRowCarousel({
     if (!rowRef.current) return;
     setScrolling(true);
     rowRef.current.scrollBy({
-      left: dir === 'left' ? -760 : 760,
+      left: Math.round(rowRef.current.clientWidth * 0.85) * (dir === 'left' ? -1 : 1),
       behavior: 'smooth',
     });
     setTimeout(() => setScrolling(false), 400);
@@ -277,13 +280,11 @@ function ChannelRowCarousel({
         <div>
           <h3 className="text-lg sm:text-2xl font-extrabold text-white tracking-tight flex items-center gap-2.5">
             <span className="w-1.5 h-5 bg-[#E50914] rounded-full inline-block shadow-[0_0_8px_#E50914]" />
-            <span>{title}</span>
+            <span>{title.replace(/^[^\p{L}\p{N}]+/u, '')}</span>
           </h3>
           {subtitle && <p className="text-xs text-neutral-400 mt-0.5 ml-4">{subtitle}</p>}
         </div>
-        <span className="text-[11px] text-neutral-500 font-semibold">
-          {channels.length} canales
-        </span>
+        <div className="flex items-center gap-3"><span className="text-[11px] text-neutral-500 font-semibold">{channels.length} canales</span>{onViewAll && channels.length > maxItems && <button type="button" onClick={onViewAll} className="text-xs font-bold text-white hover:text-red-400">Ver todos</button>}</div>
       </div>
 
       <button
@@ -307,7 +308,7 @@ function ChannelRowCarousel({
           scrolling ? 'scale-[0.995]' : 'scale-100'
         }`}
       >
-        {channels.slice(0, 28).map((ch) => (
+        {channels.slice(0, maxItems).map((ch) => (
           <NetflixChannelCard
             key={`row-${title}-${ch.url}`}
             channel={ch}
@@ -343,6 +344,7 @@ export default function LiveTV() {
   const [isMuted, setIsMuted] = useState(false);
   const [volume, setVolume] = useState(1);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isFullscreenFallback, setIsFullscreenFallback] = useState(false);
   const [launchMessage, setLaunchMessage] = useState(null);
 
   const [hlsLevels, setHlsLevels] = useState([]);
@@ -350,6 +352,7 @@ export default function LiveTV() {
   const [cinemaBoost, setCinemaBoost] = useState(true);
   const [videoDimensions, setVideoDimensions] = useState({ width: 0, height: 0 });
   const [showHud, setShowHud] = useState(true);
+  const [mixRotation, setMixRotation] = useState(0);
 
   const videoRef = useRef(null);
   const hlsRef = useRef(null);
@@ -357,6 +360,25 @@ export default function LiveTV() {
   const watchdogTimerRef = useRef(null);
   const hudTimerRef = useRef(null);
   const autoRetriedDirectRef = useRef(false);
+
+  useEffect(() => {
+    const syncFullscreen = () => setIsFullscreen(document.fullscreenElement === videoRef.current);
+    document.addEventListener('fullscreenchange', syncFullscreen);
+    videoRef.current?.addEventListener('webkitendfullscreen', syncFullscreen);
+    return () => {
+      document.removeEventListener('fullscreenchange', syncFullscreen);
+      videoRef.current?.removeEventListener('webkitendfullscreen', syncFullscreen);
+    };
+  }, [currentChannel?.url]);
+
+  useEffect(() => {
+    if (!isFullscreenFallback) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const closeOnEscape = (event) => { if (event.key === 'Escape') setIsFullscreenFallback(false); };
+    document.addEventListener('keydown', closeOnEscape);
+    return () => { document.body.style.overflow = previous; document.removeEventListener('keydown', closeOnEscape); };
+  }, [isFullscreenFallback]);
 
   const [favorites, setFavorites] = useState(() => {
     try {
@@ -625,7 +647,7 @@ export default function LiveTV() {
       result = result.filter((c) => favorites.includes(c.url));
     } else if (selectedCategory === 'CineSeries') {
       result = result.filter(
-        (c) => c.category === 'Pluto TV 24/7' || c.category === 'Películas y Series'
+        (c) => c.category === 'Películas y Series' || (c.category === 'Pluto TV 24/7' && /cine|pel[ií]culas|movie|film|series/i.test(`${c.rawCategory} ${c.name}`))
       );
     } else if (selectedCategory === 'Deportes') {
       result = result.filter((c) => c.category === 'Deportes');
@@ -682,10 +704,11 @@ export default function LiveTV() {
       )
       .slice(0, 28);
     const movies247 = channels.filter(
-      (c) => c.category === 'Pluto TV 24/7' || c.category === 'Películas y Series'
+      (c) => c.category === 'Películas y Series' || (c.category === 'Pluto TV 24/7' && /cine|pel[ií]culas|movie|film|series/i.test(`${c.rawCategory} ${c.name}`))
     );
     const sportsLive = channels.filter((c) => c.category === 'Deportes');
-    const colombiaTv = channels.filter((c) => c.country === 'co' || c.category === 'Colombia');
+    const colombiaPriority = /^(Señal Colombia|Canal Institucional|Canal 1|Caracol TV|RCN TV|Canal Capital|Teleantioquia|Telecaribe|Telepacífico|Telecafé|Teleislas|Canal TRO|Canal Trece|Telemedellín)/i;
+    const colombiaTv = channels.filter((c) => c.country === 'co' || c.category === 'Colombia').sort((a, b) => Number(colombiaPriority.test(b.name)) - Number(colombiaPriority.test(a.name)) || a.name.localeCompare(b.name, 'es'));
     const mexicoLatam = channels.filter(
       (c) =>
         c.country === 'mx' ||
@@ -699,6 +722,7 @@ export default function LiveTV() {
     const musicVariety = channels.filter(
       (c) => c.category === 'Música' || c.category === 'Entretenimiento'
     );
+    const curatedMix = getCuratedChannelMix(channels, `${new Date().toISOString().slice(0, 10)}:${mixRotation}`);
 
     return {
       favList,
@@ -711,8 +735,9 @@ export default function LiveTV() {
       animeGaming,
       newsGlobal,
       musicVariety,
+      curatedMix,
     };
-  }, [channels, favorites]);
+  }, [channels, favorites, mixRotation]);
 
   const hlsSelectOptions = useMemo(() => {
     const base = [{ value: -1, label: 'Auto H.264 HD', icon: '⚡', badge: 'SMART' }];
@@ -814,19 +839,16 @@ export default function LiveTV() {
     }
   };
 
-  const toggleFullscreen = () => {
-    if (!playerContainerRef.current) return;
-    if (!document.fullscreenElement) {
-      playerContainerRef.current
-        .requestFullscreen()
-        .then(() => setIsFullscreen(true))
-        .catch(() => {});
-    } else {
-      document
-        .exitFullscreen()
-        .then(() => setIsFullscreen(false))
-        .catch(() => {});
-    }
+  const toggleFullscreen = async () => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (isFullscreenFallback) { setIsFullscreenFallback(false); return; }
+    try {
+      if (document.fullscreenElement === video) await document.exitFullscreen();
+      else if (video.requestFullscreen) await video.requestFullscreen();
+      else if (video.webkitEnterFullscreen) video.webkitEnterFullscreen();
+      else setIsFullscreenFallback(true);
+    } catch { setIsFullscreenFallback(true); }
   };
 
   const handleLevelChange = (lvlIdx) => {
@@ -903,7 +925,7 @@ export default function LiveTV() {
         <div
           ref={playerContainerRef}
           onMouseMove={triggerHud}
-          className="relative w-full h-[78vh] sm:h-[84vh] lg:h-[88vh] bg-black overflow-hidden select-none"
+          className={`relative w-full h-[78vh] sm:h-[84vh] lg:h-[88vh] bg-black overflow-hidden select-none ${isFullscreenFallback ? 'tv-fullscreen-fallback' : ''}`}
         >
           {/* Video En Directo a Pantalla Completa dentro del Billboard */}
           <video
@@ -913,7 +935,8 @@ export default function LiveTV() {
             }`}
             playsInline
             autoPlay
-            onClick={togglePlay}
+            controls={isFullscreen || isFullscreenFallback}
+            onClick={isFullscreen || isFullscreenFallback ? undefined : togglePlay}
             onLoadedMetadata={(e) => {
               const vw = e.currentTarget.videoWidth;
               const vh = e.currentTarget.videoHeight;
@@ -927,6 +950,7 @@ export default function LiveTV() {
               if (vw > 0 && vh > 0) setAudioOnlyWarning(false);
             }}
           />
+          {isFullscreenFallback && <button type="button" className="tv-fullscreen-exit" onClick={() => setIsFullscreenFallback(false)} aria-label="Salir de pantalla completa">✕ Salir</button>}
 
           {/* Degradados Cinemáticos de Netflix (se atenúan cuando el HUD se oculta para ver limpio) */}
           <div
@@ -1008,8 +1032,8 @@ export default function LiveTV() {
                 onClick={toggleFullscreen}
                 className="flex items-center gap-2 px-6 py-2.5 bg-white hover:bg-neutral-200 text-black font-extrabold text-xs sm:text-sm rounded-md shadow-[0_8px_25px_rgba(255,255,255,0.25)] transition-all hover:scale-105"
               >
-                <Maximize className="w-4 h-4" />
-                <span>Pantalla Completa</span>
+                {isFullscreen || isFullscreenFallback ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
+                <span>{isFullscreen || isFullscreenFallback ? 'Salir de pantalla completa' : 'Pantalla Completa'}</span>
               </button>
 
               <button
@@ -1399,6 +1423,8 @@ export default function LiveTV() {
             />
           )}
 
+          {netflixLiveRows.curatedMix.length > 0 && <div><div className="max-w-[1480px] mx-auto px-4 sm:px-8 lg:px-12 flex justify-end"><button type="button" onClick={() => setMixRotation((value) => value + 1)} className="text-xs font-bold text-neutral-300 hover:text-white">Otra selección ↻</button></div><ChannelRowCarousel title="🎲 Para cambiar de aire" subtitle="Una mezcla rotativa de cine, animación, noticias y señales colombianas disponibles" channels={netflixLiveRows.curatedMix} currentChannel={currentChannel} onSelectChannel={handleSelectChannel} onToggleFavorite={toggleFavorite} isFavorite={isFavorite} maxItems={28} /></div>}
+
           <ChannelRowCarousel
             title="🔥 Canales Estrella Más Vistos Ahora"
             subtitle="Las señales en directo más populares en alta definición"
@@ -1433,6 +1459,8 @@ export default function LiveTV() {
             title="🇨🇴 Televisión de Colombia"
             subtitle="Señales nacionales y regionales de Colombia en vivo"
             channels={netflixLiveRows.colombiaTv}
+            maxItems={100}
+            onViewAll={() => { setSelectedCategory('Colombia'); window.scrollTo({ top: 600, behavior: 'smooth' }); }}
             currentChannel={currentChannel}
             onSelectChannel={handleSelectChannel}
             onToggleFavorite={toggleFavorite}

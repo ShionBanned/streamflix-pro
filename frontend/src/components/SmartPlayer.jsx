@@ -35,6 +35,11 @@ import {
 import { LANGUAGE_OPTIONS, AUDIO_ENGINE_PRESETS } from '../hooks/useUserMedia.js';
 
 const DirectPlayer = React.lazy(() => import('./DirectPlayer.jsx'));
+const SITE_SOURCES = [
+  { id: 'cuevana', name: 'Cuevana', example: 'https://cuevana3w.pro/pelicula/... o /serie/.../episodio-1x1' },
+  { id: 'animeav1', name: 'AnimeAV1', example: 'https://animeav1.com/media/.../1' },
+];
+const SOURCE_LANGUAGE_LABELS = { latino: 'Latino', castellano: 'Castellano', subtitulado: 'Subtitulado', doblado: 'Doblado', multi: 'Multilenguaje', vose: 'Original / VOSE', unknown: 'Sin confirmar' };
 
 /**
  * Construye siempre en el cliente las 8 Familias Cloud (25 Espejos Activos)
@@ -84,6 +89,8 @@ export default function SmartPlayer({
   const currentEpisode = episode || 1;
   const mediaType = isSeries ? 'tv' : 'movie';
   const directStorageKey = `streamflix:direct:${mediaType}:${item?.id || item?.tmdbId}:${currentSeason}:${currentEpisode}`;
+  const siteStorageKey = `streamflix:site-pages:${mediaType}:${item?.id || item?.tmdbId}:${currentSeason}:${currentEpisode}`;
+  const siteTitleStorageKey = `streamflix:site-titles:${mediaType}:${item?.id || item?.tmdbId}`;
   const originalLanguage = item?.original_language || null;
 
   useEffect(() => {
@@ -102,6 +109,48 @@ export default function SmartPlayer({
     return 'vidsrc';
   });
   const [activeMirrorIdx, setActiveMirrorIdx] = useState(0);
+  const [sitePageInputs, setSitePageInputs] = useState({ cuevana: '', animeav1: '' });
+  const [siteServers, setSiteServers] = useState({ cuevana: [], animeav1: [] });
+  const [siteTitlePages, setSiteTitlePages] = useState({ cuevana: '', animeav1: '' });
+  const [siteSearchQueries, setSiteSearchQueries] = useState({ cuevana: item?.title || item?.name || '', animeav1: item?.original_name || item?.name || item?.title || '' });
+  const [siteCandidates, setSiteCandidates] = useState({ cuevana: [], animeav1: [] });
+  const [siteLanguageFilter, setSiteLanguageFilter] = useState({ cuevana: 'all', animeav1: 'all' });
+  const [torrentLanguageFilter, setTorrentLanguageFilter] = useState('all');
+  const [siteLoading, setSiteLoading] = useState({});
+  const [siteErrors, setSiteErrors] = useState({});
+  const [openSiteCategory, setOpenSiteCategory] = useState(null);
+  const [compatibilityUrl, setCompatibilityUrl] = useState(null);
+  const [showCompatibilityPrompt, setShowCompatibilityPrompt] = useState(false);
+
+  useEffect(() => {
+    let saved = {}; let titles = {};
+    try { saved = JSON.parse(localStorage.getItem(siteStorageKey) || '{}') || {}; } catch { saved = {}; }
+    try { titles = JSON.parse(localStorage.getItem(siteTitleStorageKey) || '{}') || {}; } catch { titles = {}; }
+    const inputs = { cuevana: saved.cuevana || '', animeav1: saved.animeav1 || '' };
+    setSiteTitlePages({ cuevana: titles.cuevana || '', animeav1: titles.animeav1 || '' });
+    setSiteSearchQueries({ cuevana: item?.title || item?.name || '', animeav1: item?.original_name || item?.name || item?.title || '' });
+    setSitePageInputs(inputs);
+    setSiteServers({ cuevana: [], animeav1: [] });
+    setSiteCandidates({ cuevana: [], animeav1: [] });
+    setSiteErrors({});
+    const controller = new AbortController();
+    for (const source of SITE_SOURCES) {
+      const titleUrl = titles[source.id];
+      if (!titleUrl && !inputs[source.id]) continue;
+      const endpoint = titleUrl ? '/api/site-resolve' : '/api/site-servers';
+      const params = titleUrl ? { source: source.id, titleUrl, season: currentSeason, episode: currentEpisode } : { source: source.id, url: inputs[source.id] };
+      setSiteLoading(current => ({ ...current, [source.id]: true }));
+      axios.get(endpoint, { params, timeout: 20000, signal: controller.signal })
+        .then(({ data }) => {
+          if (controller.signal.aborted) return;
+          setSiteServers(current => ({ ...current, [source.id]: data.servers || [] }));
+          setSitePageInputs(current => ({ ...current, [source.id]: data.pageUrl || '' }));
+        })
+        .catch(error => { if (!controller.signal.aborted) setSiteErrors(current => ({ ...current, [source.id]: error.response?.data?.error || 'No se pudieron actualizar los servidores guardados.' })); })
+        .finally(() => { if (!controller.signal.aborted) setSiteLoading(current => ({ ...current, [source.id]: false })); });
+    }
+    return () => controller.abort();
+  }, [siteStorageKey, siteTitleStorageKey, currentSeason, currentEpisode, item?.title, item?.name, item?.original_name]);
 
   // Los iframes ajenos permanecen aislados: no tienen permiso para abrir ventanas ni navegar la página superior.
 
@@ -144,6 +193,7 @@ export default function SmartPlayer({
   const localSubtitleRef = useRef(null);
   const audioTrackManualRef = useRef(false);
   const [cloudStatus, setCloudStatus] = useState('loading');
+  const [cloudProbe, setCloudProbe] = useState({ status: 'checking', reason: '' });
   const [cloudHealth, setCloudHealth] = useState([]);
   const [checkingCloud, setCheckingCloud] = useState(false);
   const [transcodeStart, setTranscodeStart] = useState(Math.max(0, Number(initialTime) || 0));
@@ -944,9 +994,9 @@ export default function SmartPlayer({
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
-  // Siempre usar nuestro clúster completo de 8 Familias Cloud (25 espejos) sin bloqueo de sandbox
+  // Los enlaces de cada página se obtienen del servidor local y se agrupan por sitio.
   const embedServersList = useMemo(() => {
-    return buildEmbedServers({
+    const built = buildEmbedServers({
       tmdbId: item.id || item.tmdbId,
       imdbId: resolutionData?.imdbId || item.imdb_id || item.imdbId,
       isSeries,
@@ -954,6 +1004,12 @@ export default function SmartPlayer({
       episode: currentEpisode,
       preferredLanguage: selectedLanguage,
     });
+    const sites = SITE_SOURCES.filter(source => siteServers[source.id]?.length).map(source => ({
+      id: source.id, name: source.name, badge: 'Página del título', siteSource: true,
+      mirrors: siteServers[source.id].map(server => ({ id: server.id, name: server.name, url: server.url, audioLabel: server.audioLabel })),
+      url: siteServers[source.id][0].url,
+    }));
+    return [...built, ...sites];
   }, [
     item.id,
     item.tmdbId,
@@ -964,6 +1020,7 @@ export default function SmartPlayer({
     currentSeason,
     currentEpisode,
     selectedLanguage,
+    siteServers,
   ]);
 
   const currentEmbedServerObj = useMemo(() => {
@@ -977,7 +1034,7 @@ export default function SmartPlayer({
         ? currentEmbedServerObj.mirrors[activeMirrorIdx].url
         : currentEmbedServerObj.url || '';
 
-    if (resumeOffset > 10 && base) {
+    if (resumeOffset > 10 && base && !currentEmbedServerObj.siteSource) {
       const sep = base.includes('?') ? '&' : '?';
       if (base.includes('smashy.stream')) {
         base = `${base}${sep}startTime=${resumeOffset}`;
@@ -990,10 +1047,102 @@ export default function SmartPlayer({
     return base;
   }, [currentEmbedServerObj, activeMirrorIdx, resumeOffset]);
 
+  useEffect(() => {
+    if (['p2p', 'direct', 'trailer'].includes(activeServer) || currentEmbedServerObj?.siteSource) {
+      setCloudProbe({ status: 'unknown', reason: '' });
+      return;
+    }
+    const mirror = currentEmbedServerObj?.mirrors?.[activeMirrorIdx];
+    if (!mirror || !(item.id || item.tmdbId)) return;
+    const controller = new AbortController();
+    setCloudProbe({ status: 'checking', reason: '' });
+    axios.get('/api/cloud/health', {
+      params: { tmdbId: item.id || item.tmdbId, imdbId: resolutionData?.imdbId || item.imdb_id || item.imdbId, type: mediaType, season: currentSeason, episode: currentEpisode, serverId: activeServer, mirrorId: mirror.id },
+      timeout: 9000, signal: controller.signal,
+    }).then(({ data }) => {
+      if (controller.signal.aborted) return;
+      const result = data.results?.[0];
+      if (!result) { setCloudProbe({ status: 'unknown', reason: 'No se pudo comprobar esta fuente.' }); return; }
+      setCloudHealth(current => [...current.filter(entry => entry.url !== result.url), result]);
+      setCloudProbe({ status: result.status, reason: result.reason || '' });
+    }).catch(() => { if (!controller.signal.aborted) setCloudProbe({ status: 'unknown', reason: 'No se pudo comprobar esta fuente.' }); });
+    return () => controller.abort();
+  }, [activeServer, activeMirrorIdx, currentEmbedServerObj?.mirrors?.[activeMirrorIdx]?.url, currentEmbedServerObj?.siteSource, item.id, item.tmdbId, item.imdb_id, item.imdbId, resolutionData?.imdbId, mediaType, currentSeason, currentEpisode]);
+
   const cloudHealthControllerRef = useRef(null);
   const switchCloud = (serverId, index = 0) => {
     setResumeOffset(Math.max(0, Math.floor(trackedTimeRef.current || 0)));
+    setCompatibilityUrl(null); setShowCompatibilityPrompt(false);
     setActiveServer(serverId); setActiveMirrorIdx(index);
+  };
+  const selectSiteTitle = async (source, candidate) => {
+    setSiteLoading(current => ({ ...current, [source]: true }));
+    setSiteErrors(current => ({ ...current, [source]: '' }));
+    try {
+      const { data } = await axios.get('/api/site-resolve', { params: { source, titleUrl: candidate.titleUrl, season: currentSeason, episode: currentEpisode }, timeout: 20000 });
+      setSiteServers(current => ({ ...current, [source]: data.servers || [] }));
+      setSitePageInputs(current => ({ ...current, [source]: data.pageUrl }));
+      setSiteTitlePages(current => ({ ...current, [source]: data.titleUrl }));
+      setSiteCandidates(current => ({ ...current, [source]: [] }));
+      setSiteLanguageFilter(current => ({ ...current, [source]: 'all' }));
+      const saved = JSON.parse(localStorage.getItem(siteTitleStorageKey) || '{}') || {};
+      saved[source] = data.titleUrl;
+      localStorage.setItem(siteTitleStorageKey, JSON.stringify(saved));
+    } catch (error) {
+      setSiteErrors(current => ({ ...current, [source]: error.response?.data?.error || 'No se pudo localizar el episodio.' }));
+    } finally { setSiteLoading(current => ({ ...current, [source]: false })); }
+  };
+  const searchSiteTitles = async (source) => {
+    const query = siteSearchQueries[source]?.trim();
+    if (!query) return;
+    setSiteLoading(current => ({ ...current, [source]: true }));
+    setSiteErrors(current => ({ ...current, [source]: '' }));
+    try {
+      const { data } = await axios.get('/api/site-search', { params: { source, title: query }, timeout: 20000 });
+      const candidates = data.candidates || [];
+      setSiteCandidates(current => ({ ...current, [source]: candidates }));
+      if (!candidates.length) setSiteErrors(current => ({ ...current, [source]: 'No hubo coincidencias. Prueba con otro nombre o usa el enlace manual.' }));
+      else if (candidates[0].score === 1 && (source === 'animeav1' || candidates[0].type === mediaType) && (candidates.length === 1 || candidates[1].score < 1)) {
+        await selectSiteTitle(source, candidates[0]);
+      }
+    } catch (error) {
+      setSiteErrors(current => ({ ...current, [source]: error.response?.data?.error || 'No se pudo buscar en esta fuente.' }));
+    } finally { setSiteLoading(current => ({ ...current, [source]: false })); }
+  };
+  const clearSiteTitle = (source) => {
+    const titles = JSON.parse(localStorage.getItem(siteTitleStorageKey) || '{}') || {};
+    const pages = JSON.parse(localStorage.getItem(siteStorageKey) || '{}') || {};
+    delete titles[source]; delete pages[source];
+    localStorage.setItem(siteTitleStorageKey, JSON.stringify(titles));
+    localStorage.setItem(siteStorageKey, JSON.stringify(pages));
+    setSiteTitlePages(current => ({ ...current, [source]: '' }));
+    setSitePageInputs(current => ({ ...current, [source]: '' }));
+    setSiteServers(current => ({ ...current, [source]: [] }));
+    setSiteCandidates(current => ({ ...current, [source]: [] }));
+    if (activeServer === source) switchCloud('vidsrc');
+  };
+  const refreshSiteServers = async (source) => {
+    setSiteLoading(current => ({ ...current, [source]: true }));
+    setSiteErrors(current => ({ ...current, [source]: '' }));
+    try {
+      const response = await axios.get('/api/site-servers', { params: { source, url: sitePageInputs[source].trim() }, timeout: 15000 });
+      const servers = response.data.servers || [];
+      setSiteServers(current => ({ ...current, [source]: servers }));
+      if (!servers.length) throw new Error('La página respondió, pero no publicó reproductores compatibles.');
+      const saved = JSON.parse(localStorage.getItem(siteStorageKey) || '{}') || {};
+      saved[source] = response.data.pageUrl;
+      localStorage.setItem(siteStorageKey, JSON.stringify(saved));
+      if (response.data.titleUrl) {
+        const titles = JSON.parse(localStorage.getItem(siteTitleStorageKey) || '{}') || {};
+        titles[source] = response.data.titleUrl;
+        localStorage.setItem(siteTitleStorageKey, JSON.stringify(titles));
+        setSiteTitlePages(current => ({ ...current, [source]: response.data.titleUrl }));
+      }
+      setSiteLanguageFilter(current => ({ ...current, [source]: 'all' }));
+      setSitePageInputs(current => ({ ...current, [source]: response.data.pageUrl }));
+    } catch (error) {
+      setSiteErrors(current => ({ ...current, [source]: error.response?.data?.error || error.message || 'No se pudieron obtener los servidores.' }));
+    } finally { setSiteLoading(current => ({ ...current, [source]: false })); }
   };
   const openDirectSource = () => {
     try { const url = new URL(directInput.trim()); if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) throw new Error(); setDirectUrl(url.href); setActiveServer('direct'); setActiveDrawer(null); const next = [url.href, ...savedDirectSources.filter(value => value !== url.href)].slice(0, 20); localStorage.setItem(directStorageKey, JSON.stringify(next)); setSavedDirectSources(next); }
@@ -1022,6 +1171,8 @@ export default function SmartPlayer({
     return () => clearTimeout(timer);
   }, [currentEmbedUrl, activeServer]);
   const healthLabels = { reachable: 'Página accesible', unavailable: 'No disponible', 'frame-blocked': 'Bloquea iframe', challenge: 'Requiere verificación', 'invalid-certificate': 'Certificado inválido', redirected: 'Dominio cambió' };
+  const torrentLanguages = [...new Set((resolutionData?.streams || []).map(stream => stream.languageCode).filter(Boolean))];
+  const visibleTorrentStreams = torrentLanguageFilter === 'all' ? (resolutionData?.streams || []) : (resolutionData?.streams || []).filter(stream => stream.languageCode === torrentLanguageFilter);
 
   const drawerSeasonOptions = useMemo(() => {
     return Array.from({ length: totalSeasons }, (_, i) => ({
@@ -1049,6 +1200,9 @@ export default function SmartPlayer({
       : activeServer === 'trailer'
       ? 'Tráiler'
       : currentEmbedServerObj?.name || 'VidSrcMe Ultra (#1)';
+  const cloudSourceBlocked = !['p2p', 'direct', 'trailer'].includes(activeServer) && !currentEmbedServerObj?.siteSource && ['unavailable', 'frame-blocked', 'challenge', 'invalid-certificate', 'redirected'].includes(cloudProbe.status);
+  const cloudSourceChecking = !['p2p', 'direct', 'trailer'].includes(activeServer) && !currentEmbedServerObj?.siteSource && cloudProbe.status === 'checking';
+  const playerBackdrop = item?.backdrop_url || (item?.backdrop_path ? `https://image.tmdb.org/t/p/w1280${item.backdrop_path}` : null) || item?.poster_url || (item?.poster_path ? `https://image.tmdb.org/t/p/w780${item.poster_path}` : null);
 
   return (
     <div
@@ -1057,7 +1211,7 @@ export default function SmartPlayer({
       onClick={() => {
         if (activeDrawer) setActiveDrawer(null);
       }}
-      className="fixed inset-0 z-50 bg-black overflow-hidden select-none font-netflix animate-fadeIn"
+      className="fixed inset-0 z-50 bg-[#080808] overflow-hidden select-none font-netflix animate-fadeIn"
     >
       <div
         onMouseEnter={triggerHudVisibility}
@@ -1068,14 +1222,14 @@ export default function SmartPlayer({
       {/* HUD SUPERIOR FLOTANTE ULTRA-LIMPIO */}
       <div
         onClick={(e) => e.stopPropagation()}
-        className={`absolute top-4 left-4 right-4 z-40 flex items-center justify-between gap-3 pointer-events-none transition-all duration-500 ${
-          showHud || activeDrawer
+        className={`absolute top-0 left-0 right-0 z-40 flex flex-col lg:flex-row lg:items-start justify-between gap-2 px-4 py-4 sm:px-6 sm:py-5 bg-gradient-to-b from-black/90 via-black/55 to-transparent pointer-events-none transition-all duration-300 ${
+          showHud || activeDrawer || !['p2p', 'direct', 'trailer'].includes(activeServer)
             ? 'opacity-100 translate-y-0'
             : 'opacity-0 -translate-y-4 pointer-events-none'
         }`}
       >
         <div className="pointer-events-auto flex items-center gap-2 flex-wrap">
-          <div className="flex items-center gap-2.5 bg-black/80 hover:bg-black/95 backdrop-blur-xl border border-white/15 pl-2 pr-4 py-1.5 rounded-full shadow-[0_10px_30px_rgba(0,0,0,0.85)] transition-all">
+          <div className="flex items-center gap-2.5 bg-black/55 hover:bg-black/75 backdrop-blur-xl border border-white/10 pl-1.5 pr-4 py-1 rounded-full shadow-xl transition-all">
             <button
               onClick={handleSafeClose}
               className="w-8 h-8 rounded-full bg-white/10 hover:bg-[#E50914] text-white flex items-center justify-center transition-all hover:scale-105"
@@ -1085,7 +1239,7 @@ export default function SmartPlayer({
             </button>
 
             <div className="flex items-center gap-2 max-w-[180px] sm:max-w-md truncate">
-              <span className="text-xs sm:text-sm font-extrabold text-white truncate">
+              <span className="text-xs sm:text-sm font-bold text-white truncate">
                 {title}
               </span>
               {isSeries && (
@@ -1096,7 +1250,7 @@ export default function SmartPlayer({
             </div>
           </div>
 
-          {activeServer !== 'p2p' && activeServer !== 'trailer' && activeServer !== 'direct' && <span className="hidden md:flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold border bg-emerald-950/85 text-emerald-300 border-emerald-500/45"><Shield className="w-3.5 h-3.5" /> Iframe aislado</span>}
+          {activeServer !== 'p2p' && activeServer !== 'trailer' && activeServer !== 'direct' && <span className={`hidden xl:flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium border bg-black/45 ${compatibilityUrl === currentEmbedUrl ? 'text-amber-300 border-amber-500/30' : 'text-neutral-300 border-white/10'}`}><Shield className="w-3.5 h-3.5" /> {compatibilityUrl === currentEmbedUrl ? 'Modo compatible' : 'Reproductor aislado'}</span>}
 
           {showResumeBanner && resumeOffset > 10 && (
             <div className="flex items-center gap-2 bg-emerald-950/90 backdrop-blur-xl border border-emerald-500/40 px-3 py-1.5 rounded-full text-xs text-emerald-200 shadow-lg animate-fadeIn">
@@ -1113,7 +1267,7 @@ export default function SmartPlayer({
         </div>
 
         {/* Controles Derecha: Episodios + 🎧 Motor de Audio + 8 Familias Cloud / Torrentio */}
-        <div className="pointer-events-auto flex items-center gap-2">
+        <div className="pointer-events-auto flex items-center gap-2 justify-end min-w-0">
           {isSeries && (
             <>
               <button
@@ -1160,7 +1314,7 @@ export default function SmartPlayer({
                 : 'bg-black/80 hover:bg-black/95 text-white border-white/15'
             }`}
           >
-            <Headphones className="w-3.5 h-3.5 text-[#E50914]" />
+            <Headphones className="w-3.5 h-3.5 text-neutral-200" />
             <span>{currentLangObj.flag}</span>
             <span className="hidden sm:inline">Motor de Audio</span>
             <ChevronDown className="w-3.5 h-3.5 opacity-75" />
@@ -1176,8 +1330,8 @@ export default function SmartPlayer({
                 : 'bg-black/80 hover:bg-black/95 text-white border-white/15'
             }`}
           >
-            <Layers className="w-3.5 h-3.5 text-emerald-400" />
-            <span>{activeServerLabel}</span>
+            <Layers className="w-3.5 h-3.5 text-neutral-200" />
+            <span className="max-w-[115px] sm:max-w-[175px] truncate">{activeServerLabel}</span>
             <ChevronDown className="w-3.5 h-3.5 opacity-75" />
           </button>
         </div>
@@ -1383,7 +1537,7 @@ export default function SmartPlayer({
             <div>
               <h3 className="text-xs font-extrabold uppercase tracking-wider text-white flex items-center gap-1.5">
                 <Server className="w-3.5 h-3.5 text-[#E50914]" />
-                {embedServersList.length} proveedores Cloud & P2P
+                {embedServersList.length} proveedores Cloud y sitios
               </h3>
               <p className="text-[10px] text-neutral-400 mt-0.5">Los proveedores externos se abren aislados. Algunos pueden no funcionar con esta protección.</p>
             </div>
@@ -1406,7 +1560,7 @@ export default function SmartPlayer({
             </div>
             {cloudHealth.length > 0 && <p className="text-[11px] text-neutral-400">{cloudHealth.filter(result => result.status === 'reachable').length} páginas accesibles de {cloudHealth.length}. Una página accesible todavía puede fallar al reproducir el video.</p>}
             <div className="grid grid-cols-2 gap-1.5">
-              {embedServersList.map((srv) => {
+              {embedServersList.filter(srv => !srv.siteSource).map((srv) => {
                 const isSelected = activeServer === srv.id;
                 return (
                   <button
@@ -1432,8 +1586,42 @@ export default function SmartPlayer({
               })}
             </div>
 
+            <div className="space-y-2 pt-2 border-t border-white/10">
+              {SITE_SOURCES.map(source => {
+                const servers = siteServers[source.id] || [];
+                const languages = [...new Set(servers.map(server => server.languageCode).filter(code => code && code !== 'unknown'))];
+                const visibleServers = siteLanguageFilter[source.id] === 'all' ? servers : servers.filter(server => server.languageCode === siteLanguageFilter[source.id]);
+                const expanded = openSiteCategory === source.id;
+                return <div key={source.id} className="rounded-xl border border-white/10 bg-neutral-900/60 overflow-hidden">
+                  <button type="button" onClick={() => setOpenSiteCategory(expanded ? null : source.id)} className="w-full p-3 flex items-center justify-between text-left hover:bg-neutral-800/60" aria-expanded={expanded}>
+                    <span className="text-xs font-bold text-white">{source.name} <span className="text-neutral-400 font-normal">· {servers.length} servidores</span></span>
+                    <ChevronDown className={`w-4 h-4 text-neutral-400 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+                  </button>
+                  {expanded && <div className="px-3 pb-3 space-y-2">
+                    <p className="text-[10px] text-neutral-400">Busca una vez el título. La temporada y el episodio se resolverán automáticamente.</p>
+                    <div className="flex gap-1.5">
+                      <input type="search" aria-label={`Buscar título en ${source.name}`} value={siteSearchQueries[source.id]} onChange={event => setSiteSearchQueries(current => ({ ...current, [source.id]: event.target.value }))} onKeyDown={event => { if (event.key === 'Enter') searchSiteTitles(source.id); }} placeholder="Nombre de la serie o película" className="min-w-0 flex-1 p-2 rounded-lg bg-black/70 border border-white/20 text-white text-[11px]" />
+                      <button type="button" disabled={siteLoading[source.id] || !siteSearchQueries[source.id]?.trim()} onClick={() => searchSiteTitles(source.id)} className="px-2.5 rounded-lg bg-red-700 text-white text-[11px] font-bold disabled:opacity-50">{siteLoading[source.id] ? 'Buscando…' : 'Buscar'}</button>
+                    </div>
+                    {siteTitlePages[source.id] && <div className="flex items-center justify-between gap-2 rounded-lg bg-emerald-950/30 border border-emerald-500/20 px-2.5 py-2"><span className="text-[10px] text-emerald-200 truncate">Título vinculado · {siteTitlePages[source.id].split('/').pop()}</span><button type="button" onClick={() => clearSiteTitle(source.id)} className="text-[10px] text-neutral-300 hover:text-white shrink-0">Cambiar</button></div>}
+                    {(siteCandidates[source.id] || []).length > 0 && <div className="max-h-40 overflow-y-auto space-y-1">{siteCandidates[source.id].map(candidate => <button key={candidate.titleUrl} type="button" onClick={() => selectSiteTitle(source.id, candidate)} className="w-full rounded-lg border border-white/10 bg-black/45 hover:bg-neutral-800 px-2.5 py-2 text-left"><span className="block text-[11px] font-semibold text-white truncate">{candidate.title}</span><span className="text-[10px] text-neutral-400">{candidate.type === 'movie' ? 'Película' : 'Serie'}{candidate.year ? ` · ${candidate.year}` : ''}</span></button>)}</div>}
+                    {siteLoading[source.id] && <p className="text-[10px] text-neutral-400">Localizando la página y sus reproductores…</p>}
+                    {siteErrors[source.id] && <p role="alert" className="text-[10px] text-amber-300">{siteErrors[source.id]}</p>}
+                    {languages.length > 1 && <label className="flex items-center justify-between text-[10px] text-neutral-300">Idioma anunciado<select value={siteLanguageFilter[source.id]} onChange={event => setSiteLanguageFilter(current => ({ ...current, [source.id]: event.target.value }))} className="rounded bg-black/70 border border-white/20 px-2 py-1 text-white"><option value="all">Todos</option>{languages.map(code => <option key={code} value={code}>{SOURCE_LANGUAGE_LABELS[code] || code}</option>)}</select></label>}
+                    {visibleServers.map(server => <button key={server.id} type="button" onClick={() => switchCloud(source.id, servers.indexOf(server))} className={`w-full p-2.5 rounded-lg border text-left ${activeServer === source.id && activeMirrorIdx === servers.indexOf(server) ? 'bg-red-900/35 border-red-500' : 'bg-black/45 border-white/10 hover:bg-neutral-800'}`}>
+                      <span className="text-xs font-bold text-white">{server.name}</span>
+                      <span className="block text-[10px] text-neutral-400">{server.audioLabel} · {new URL(server.url).hostname}</span>
+                    </button>)}
+                    {servers.length > 0 && <p className="text-[10px] text-neutral-500">El idioma lo anuncia el sitio; se confirma al reproducir.</p>}
+                    <details className="pt-1"><summary className="text-[10px] text-neutral-400 cursor-pointer hover:text-white">Usar enlace manual de episodio o película</summary><div className="flex gap-1.5 mt-2"><input type="url" aria-label={`Página de ${source.name}`} value={sitePageInputs[source.id]} onChange={event => setSitePageInputs(current => ({ ...current, [source.id]: event.target.value }))} placeholder={source.example} className="min-w-0 flex-1 p-2 rounded-lg bg-black/70 border border-white/20 text-white text-[11px]" /><button type="button" disabled={siteLoading[source.id] || !sitePageInputs[source.id]?.trim()} onClick={() => refreshSiteServers(source.id)} className="px-2.5 rounded-lg bg-neutral-700 text-white text-[11px] font-bold disabled:opacity-50">Cargar</button></div></details>
+                  </div>}
+                </div>;
+              })}
+            </div>
+
             {activeServer !== 'p2p' &&
               activeServer !== 'trailer' &&
+              !currentEmbedServerObj?.siteSource &&
               currentEmbedServerObj?.mirrors?.length > 1 && (
                 <div className="p-2.5 rounded-xl bg-black/55 border border-white/10 space-y-2">
                   <span className="text-[10px] font-bold text-neutral-400 block">
@@ -1486,9 +1674,11 @@ export default function SmartPlayer({
               </button>
             </div>
 
+            {torrentLanguages.length > 1 && <label className="flex items-center justify-between text-[10px] text-neutral-300">Idioma de la fuente<select value={torrentLanguageFilter} onChange={event => setTorrentLanguageFilter(event.target.value)} className="rounded bg-black/70 border border-white/20 px-2 py-1 text-white"><option value="all">Todos</option>{torrentLanguages.map(code => <option key={code} value={code}>{SOURCE_LANGUAGE_LABELS[code] || code}</option>)}</select></label>}
+
             {resolutionData?.streams?.length > 0 ? (
               <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                {resolutionData.streams.slice(0, 20).map((s, idx) => {
+                {visibleTorrentStreams.slice(0, 20).map((s, idx) => {
                   const isCurrentP2P =
                     activeServer === 'p2p' && selectedP2PStream?.infoHash === s.infoHash;
                   return (
@@ -1684,10 +1874,6 @@ export default function SmartPlayer({
 
       {/* LIENZO DE VIDEO 100% PANTALLA COMPLETA */}
       <div className="relative w-full h-full bg-black flex items-center justify-center">
-        {activeServer !== 'p2p' && activeServer !== 'direct' && activeServer !== 'trailer' && ['unconfirmed', 'error', 'exhausted'].includes(cloudStatus) && <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-40 max-w-[94vw] bg-neutral-950/95 border border-white/20 rounded-xl px-4 py-3 text-xs text-center space-y-2">
-          <p>Si el video no inicia, prueba otro espejo o revisa su disponibilidad.</p>
-          <div className="flex justify-center gap-2"><button onClick={tryNextCloud} className="px-3 py-2 rounded bg-red-700">Probar siguiente espejo</button><button onClick={() => { setActiveDrawer('servers'); diagnoseCloud(); }} className="px-3 py-2 rounded bg-neutral-800">Diagnosticar fuentes</button><button onClick={() => setCloudStatus('dismissed')} className="px-2 py-1" aria-label="Ocultar aviso">✕</button></div>
-        </div>}
         {activeServer === 'direct' && directUrl ? (
           <React.Suspense fallback={<p className="text-white text-sm">Preparando reproductor directo…</p>}><DirectPlayer url={directUrl} initialTime={resumeOffset} onProgress={progress => { cloudProgressConfirmedRef.current = true; trackedTimeRef.current = progress.currentTime; trackedDurationRef.current = progress.duration; }} /></React.Suspense>
         ) : activeServer === 'trailer' && trailerFallbackKey ? (
@@ -1834,7 +2020,7 @@ export default function SmartPlayer({
             {/* Barra de Controles Inferior Flotante (Modo P2P HTML5 + Motor DSP) */}
             <div
               onClick={(e) => e.stopPropagation()}
-              className={`absolute bottom-4 left-4 right-4 bg-black/80 backdrop-blur-2xl border border-white/15 rounded-2xl px-4 py-3 space-y-2 z-30 transition-all duration-500 ${
+              className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black via-black/90 to-transparent px-4 sm:px-8 pb-5 pt-10 space-y-3 z-30 transition-all duration-300 ${
                 showHud || !isPlaying
                   ? 'opacity-100 translate-y-0'
                   : 'opacity-0 translate-y-4 pointer-events-none'
@@ -1846,11 +2032,13 @@ export default function SmartPlayer({
                 </span>
                 <input
                   type="range"
+                  aria-label="Posición del video"
                   min={0}
                   max={duration || 100}
                   value={currentTime}
                   onChange={handleSeek}
-                  className="w-full h-1.5 bg-neutral-700 rounded-lg appearance-none cursor-pointer accent-[#E50914]"
+                  className="player-progress w-full bg-neutral-600"
+                  style={{ background: `linear-gradient(to right, #e50914 ${Math.min(100, (currentTime / (duration || 100)) * 100)}%, #666 ${Math.min(100, (currentTime / (duration || 100)) * 100)}%)` }}
                 />
                 <span className="text-xs font-mono text-neutral-400 min-w-[44px]">
                   {formatTime(duration)}
@@ -1861,6 +2049,7 @@ export default function SmartPlayer({
                 <div className="flex items-center gap-3">
                   <button
                     onClick={togglePlay}
+                    aria-label={isPlaying ? 'Pausar' : 'Reproducir'}
                     className="p-1.5 text-white hover:text-[#E50914] transition"
                   >
                     {isPlaying ? (
@@ -1871,7 +2060,7 @@ export default function SmartPlayer({
                   </button>
 
                   <div className="flex items-center gap-2">
-                    <button onClick={toggleMute} className="text-neutral-300 hover:text-white">
+                    <button onClick={toggleMute} aria-label={isMuted ? 'Activar sonido' : 'Silenciar'} className="text-neutral-300 hover:text-white">
                       {isMuted ? (
                         <VolumeX className="w-4 h-4 text-[#E50914]" />
                       ) : (
@@ -1880,6 +2069,7 @@ export default function SmartPlayer({
                     </button>
                     <input
                       type="range"
+                      aria-label="Volumen"
                       min={0}
                       max={1}
                       step={0.05}
@@ -2004,11 +2194,30 @@ export default function SmartPlayer({
               </div>
             </div>
           </div>
+        ) : cloudSourceChecking || cloudSourceBlocked ? (
+          <div className="absolute inset-0 flex items-center justify-center overflow-hidden bg-[#0b0b0b]">
+            {playerBackdrop && <img src={playerBackdrop} alt="" className="absolute inset-0 w-full h-full object-cover opacity-25 blur-xl scale-110" />}
+            <div className="absolute inset-0 bg-gradient-to-t from-black via-black/75 to-black/60" />
+            <div role="status" className="relative z-10 max-w-lg mx-5 text-center space-y-4 animate-fadeIn">
+              <div className="mx-auto w-14 h-14 rounded-full border border-white/15 bg-white/5 flex items-center justify-center">
+                {cloudSourceChecking ? <div className="w-6 h-6 rounded-full border-2 border-red-600/30 border-t-red-500 animate-spin" /> : <AlertTriangle className="w-6 h-6 text-red-400" />}
+              </div>
+              <div className="space-y-2">
+                <p className="text-[11px] uppercase tracking-[0.22em] font-bold text-red-400">{cloudSourceChecking ? 'Comprobando fuente' : 'Fuente no disponible'}</p>
+                <h2 className="text-xl sm:text-3xl font-bold text-white">{cloudSourceChecking ? 'Preparando la reproducción' : 'Este servidor no puede reproducirse aquí'}</h2>
+                <p className="text-sm text-neutral-300">{cloudSourceChecking ? 'Verificando la página antes de abrir el reproductor.' : cloudProbe.reason || 'Prueba otra fuente para este título.'}</p>
+              </div>
+              {!cloudSourceChecking && <div className="flex flex-wrap items-center justify-center gap-2">
+                <button onClick={tryNextCloud} className="px-5 py-2.5 rounded-md bg-white text-black hover:bg-neutral-200 text-sm font-bold transition">Probar siguiente</button>
+                <button onClick={() => setActiveDrawer('servers')} className="px-5 py-2.5 rounded-md bg-white/15 text-white hover:bg-white/25 text-sm font-bold transition">Elegir servidor</button>
+              </div>}
+            </div>
+          </div>
         ) : (
-          /* El proveedor conserva sus scripts, pero no puede abrir ventanas ni navegar el nivel superior. */
+          /* El aislamiento se retira solo para la URL que el usuario autorizó en esta sesión. */
           <iframe
             ref={embedFrameRef}
-            key={`${activeServer}-${activeMirrorIdx}-${selectedLanguage}-${resumeOffset}`}
+            key={`${activeServer}-${activeMirrorIdx}-${selectedLanguage}-${resumeOffset}-${compatibilityUrl === currentEmbedUrl ? 'compatible' : 'aislado'}`}
             onLoad={() => setCloudStatus(current => current === 'playing' ? current : 'loaded')}
             onError={() => setCloudStatus('error')}
             src={currentEmbedUrl}
@@ -2016,11 +2225,36 @@ export default function SmartPlayer({
             className="w-full h-full border-0"
             allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
             referrerPolicy="no-referrer"
-            sandbox="allow-scripts allow-presentation"
+            sandbox={compatibilityUrl === currentEmbedUrl ? undefined : 'allow-scripts allow-presentation'}
             allowFullScreen
           />
         )}
+        {activeServer !== 'p2p' && activeServer !== 'direct' && activeServer !== 'trailer' && !cloudSourceBlocked && !cloudSourceChecking && <div className="absolute bottom-0 inset-x-0 z-30 px-4 sm:px-7 pt-12 pb-4 sm:pb-6 bg-gradient-to-t from-black/90 via-black/55 to-transparent pointer-events-none">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-[10px] uppercase tracking-[0.2em] text-neutral-400 font-bold">Reproduciendo con {activeServerLabel}</p>
+              <p className="text-sm sm:text-lg font-semibold text-white truncate max-w-[65vw]">{title}{isSeries ? ` · T${currentSeason}:E${currentEpisode}` : ''}</p>
+              {['unconfirmed', 'error', 'exhausted'].includes(cloudStatus) && <p className="text-[11px] text-amber-300">No se confirmó el video. Puedes cambiar de servidor.</p>}
+              {compatibilityUrl === currentEmbedUrl && <p className="text-[11px] text-amber-300">Modo compatible activo: el proveedor puede mostrar anuncios o abrir ventanas.</p>}
+            </div>
+            <div className="flex items-center gap-2 pointer-events-auto">
+              {compatibilityUrl === currentEmbedUrl
+                ? <button onClick={() => setCompatibilityUrl(null)} className="px-3 py-2 rounded-md bg-amber-900/45 hover:bg-amber-900/70 border border-amber-500/35 text-amber-100 text-xs font-semibold transition">Volver a aislar</button>
+                : <button onClick={() => setShowCompatibilityPrompt(true)} className="px-3 py-2 rounded-md bg-white/15 hover:bg-white/25 border border-white/15 text-white text-xs font-semibold transition">Modo compatible</button>}
+              <button onClick={tryNextCloud} className="px-3 py-2 rounded-md bg-white/15 hover:bg-white/25 border border-white/15 text-white text-xs font-semibold transition">Siguiente fuente</button>
+              <button onClick={() => setActiveDrawer('servers')} className="px-3 py-2 rounded-md bg-white/15 hover:bg-white/25 border border-white/15 text-white text-xs font-semibold transition">Servidores</button>
+            </div>
+          </div>
+        </div>}
       </div>
+      {showCompatibilityPrompt && <div role="dialog" aria-modal="true" aria-labelledby="compatibility-title" onClick={event => event.stopPropagation()} className="absolute inset-0 z-[70] flex items-center justify-center bg-black/85 px-5">
+        <div className="w-full max-w-md rounded-2xl border border-amber-500/30 bg-[#1b1b1b] p-6 shadow-2xl space-y-4">
+          <div className="flex items-center gap-3 text-amber-300"><AlertTriangle className="h-6 w-6 shrink-0" /><h2 id="compatibility-title" className="text-lg font-bold text-white">Abrir este servidor en modo compatible</h2></div>
+          <p className="text-sm leading-relaxed text-neutral-300">Este proveedor rechaza el aislamiento del reproductor. Al continuar podrá mostrar anuncios o abrir ventanas emergentes. Actívalo solo si confías en esta fuente.</p>
+          <p className="text-xs text-neutral-400">Se aplicará únicamente a este servidor durante esta sesión.</p>
+          <div className="flex justify-end gap-2 pt-2"><button type="button" onClick={() => setShowCompatibilityPrompt(false)} className="rounded-lg px-4 py-2 text-sm text-neutral-200 hover:bg-white/10">Cancelar</button><button type="button" onClick={() => { setCompatibilityUrl(currentEmbedUrl); setShowCompatibilityPrompt(false); }} className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-black hover:bg-amber-500">Abrir este servidor</button></div>
+        </div>
+      </div>}
     </div>
   );
 }

@@ -146,7 +146,7 @@ export const api = {
 
       const [mainRes, iconicRes] = await Promise.allSettled([
         cachedGet('/tmdb/discover', params),
-        sortBy === 'popularity.desc' && (!decade || decade === 'all')
+        page === 1 && sortBy === 'popularity.desc' && (!decade || decade === 'all')
           ? cachedGet('/tmdb/discover', { ...params, sortBy: 'vote_count.desc' })
           : Promise.resolve({ results: [] }),
       ]);
@@ -160,7 +160,7 @@ export const api = {
 
       // Si es una subcategoría de Anime y el backend antiguo ignoró originalLanguage='ja',
       // filtrar y complementar con el catálogo de Anime de páginas 1 y 2
-      if (originalLanguage === 'ja' || (combined.length === 0 && String(genre).includes('16'))) {
+      if (page === 1 && (originalLanguage === 'ja' || (combined.length === 0 && String(genre).includes('16')))) {
         const [aniP1, aniP2] = await Promise.allSettled([
           this.getAnime(1, lang),
           this.getAnime(2, lang),
@@ -175,23 +175,17 @@ export const api = {
           .map((g) => Number(g.trim()))
           .filter((n) => !isNaN(n) && n !== 16);
 
-        const filteredPool =
-          subGenreIds.length > 0
-            ? animePool.filter(
-                (item) =>
-                  Array.isArray(item.genre_ids) &&
-                  item.genre_ids.some((id) => subGenreIds.includes(Number(id)))
-              )
-            : animePool;
+        const filteredPool = animePool.filter((item) =>
+          (!item.original_language || item.original_language === 'ja') &&
+          (subGenreIds.length === 0 ||
+            (Array.isArray(item.genre_ids) && subGenreIds.some((id) => item.genre_ids.includes(id))))
+        );
 
         const japaneseCombined = combined.filter(
           (item) => !item.original_language || item.original_language === 'ja'
         );
 
-        combined = blendPassiveItems(
-          japaneseCombined.length >= 6 ? japaneseCombined : filteredPool,
-          animePool
-        );
+        combined = [...new Map([...japaneseCombined, ...filteredPool].map((item) => [item.id, item])).values()];
       }
 
       return combined;
@@ -199,6 +193,14 @@ export const api = {
       console.warn('Error en discoverCatalog:', e.message);
       return [];
     }
+  },
+
+  async getCatalogPage({ type = 'movie', genre = 'all', sortBy = 'popularity.desc', decade = 'all', page = 1, lang = 'es-MX', originalLanguage = null } = {}) {
+    const params = { type, genre, sortBy, page, lang };
+    if (decade !== 'all') params.decade = decade;
+    if (originalLanguage) params.originalLanguage = originalLanguage;
+    const data = await cachedGet('/tmdb/discover', params);
+    return data?.results || [];
   },
 
   async getMovieSections(lang = 'es-MX') {

@@ -16,6 +16,7 @@ import {
   Film,
 } from 'lucide-react';
 import { LANGUAGE_OPTIONS } from '../hooks/useUserMedia.js';
+import { getContentRating } from '../utils/contentRating.js';
 
 /**
  * HeroBanner.jsx — Billboard Carrusel Multi-Slide con Transiciones Cinemáticas Ken Burns,
@@ -31,6 +32,7 @@ export default function HeroBanner({
   isSavedInWatchlist = false,
   preferredLanguage = 'latino',
   onChangeLanguage = null,
+  enableTrailer = true,
 }) {
   const slides = useMemo(() => {
     if (Array.isArray(items) && items.length > 0) {
@@ -42,15 +44,37 @@ export default function HeroBanner({
   const [activeIndex, setActiveIndex] = useState(0);
   const [slideDirection, setSlideDirection] = useState('next');
   const [trailerKey, setTrailerKey] = useState(null);
+  const [contentRating, setContentRating] = useState(null);
   const [showTrailer, setShowTrailer] = useState(false);
   const [isMuted, setIsMuted] = useState(true);
   const [isPausedByHover, setIsPausedByHover] = useState(false);
+  const [reduceMotion, setReduceMotion] = useState(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches || false);
+
+  useEffect(() => {
+    const query = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+    if (!query) return;
+    const update = () => setReduceMotion(query.matches);
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
 
   useEffect(() => {
     setActiveIndex(0);
   }, [sectionLabel, slides.length]);
 
   const currentItem = slides[activeIndex] || slides[0] || null;
+
+  useEffect(() => {
+    if (!currentItem?.id) { setContentRating(null); return; }
+    let active = true;
+    setContentRating(null);
+    const type = currentItem.media_type || (currentItem.first_air_date ? 'tv' : 'movie');
+    const lang = LANGUAGE_OPTIONS.find((option) => option.id === preferredLanguage)?.tmdbLang || 'es-MX';
+    (type === 'tv' ? api.getTvDetails(currentItem.id, lang) : api.getMovieDetails(currentItem.id, lang))
+      .then((details) => { if (active) setContentRating({ id: currentItem.id, label: getContentRating(details, type) }); })
+      .catch(() => { if (active) setContentRating({ id: currentItem.id, label: null }); });
+    return () => { active = false; };
+  }, [currentItem?.id, currentItem?.media_type, currentItem?.first_air_date, preferredLanguage]);
 
   const handleNextSlide = useCallback(() => {
     if (slides.length <= 1) return;
@@ -72,12 +96,12 @@ export default function HeroBanner({
 
   // Rotación automática cada 9 segundos
   useEffect(() => {
-    if (slides.length <= 1 || isPausedByHover || (showTrailer && !isMuted)) return;
+    if (slides.length <= 1 || isPausedByHover || reduceMotion || (showTrailer && !isMuted)) return;
     const interval = setInterval(() => {
-      handleNextSlide();
+      if (document.visibilityState === 'visible') handleNextSlide();
     }, 9000);
     return () => clearInterval(interval);
-  }, [slides.length, isPausedByHover, showTrailer, isMuted, handleNextSlide]);
+  }, [slides.length, isPausedByHover, showTrailer, isMuted, handleNextSlide, reduceMotion]);
 
   useEffect(() => {
     if (!currentItem?.id) return;
@@ -99,17 +123,17 @@ export default function HeroBanner({
       }
     };
 
-    fetchTrailer();
+    if (enableTrailer) fetchTrailer();
 
-    const timer = setTimeout(() => {
-      if (isMounted) setShowTrailer(true);
+    const timer = reduceMotion || !enableTrailer ? null : setTimeout(() => {
+      if (isMounted && document.visibilityState === 'visible') setShowTrailer(true);
     }, 2800);
 
     return () => {
       isMounted = false;
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
     };
-  }, [currentItem?.id, currentItem?.media_type, currentItem?.first_air_date, preferredLanguage]);
+  }, [currentItem?.id, currentItem?.media_type, currentItem?.first_air_date, preferredLanguage, reduceMotion, enableTrailer]);
 
   if (!currentItem) return null;
 
@@ -147,7 +171,7 @@ export default function HeroBanner({
     <div
       onMouseEnter={() => setIsPausedByHover(true)}
       onMouseLeave={() => setIsPausedByHover(false)}
-      className="relative w-full h-[80vh] sm:h-[86vh] lg:h-[92vh] overflow-hidden select-none bg-[#141414]"
+      className="relative w-full h-[74vh] min-h-[560px] sm:h-[82vh] lg:h-[88vh] overflow-hidden select-none bg-[#141414]"
     >
       {/* 1. Imagen Backdrop con Animación Cinemática Ken Burns en cada cambio de slide */}
       <img
@@ -175,7 +199,7 @@ export default function HeroBanner({
       )}
 
       {/* 3. Capas de Degradado Cinemático Estilo Netflix */}
-      <div className="absolute inset-0 bg-gradient-to-r from-[#141414] via-[#141414]/75 to-transparent w-full md:w-[78%] z-10" />
+      <div className="absolute inset-0 bg-gradient-to-r from-[#141414]/95 via-[#141414]/70 to-transparent w-full md:w-[78%] z-10" />
       <div className="absolute inset-0 bg-gradient-to-t from-[#141414] via-[#141414]/25 to-transparent z-10" />
       <div className="absolute bottom-0 left-0 right-0 h-44 bg-gradient-to-t from-[#141414] via-[#141414]/90 to-transparent z-10" />
       <div className="absolute top-0 left-0 right-0 h-28 bg-gradient-to-b from-black/80 to-transparent z-10" />
@@ -186,7 +210,7 @@ export default function HeroBanner({
           <button
             type="button"
             onClick={handlePrevSlide}
-            className="hidden sm:flex absolute left-3 top-1/2 -translate-y-1/2 z-30 w-11 h-16 rounded-2xl bg-black/45 hover:bg-[#E50914] text-white border border-white/15 items-center justify-center backdrop-blur-md transition-all duration-300 hover:scale-110 shadow-2xl"
+            className="hidden lg:flex absolute left-3 top-1/2 -translate-y-1/2 z-30 w-11 h-16 rounded-2xl bg-black/45 hover:bg-[#E50914] text-white border border-white/15 items-center justify-center backdrop-blur-md transition-all duration-300 hover:scale-110 shadow-2xl"
             title="Destacado anterior"
           >
             <ChevronLeft className="w-6 h-6" />
@@ -194,7 +218,7 @@ export default function HeroBanner({
           <button
             type="button"
             onClick={handleNextSlide}
-            className="hidden sm:flex absolute right-3 top-1/2 -translate-y-1/2 z-30 w-11 h-16 rounded-2xl bg-black/45 hover:bg-[#E50914] text-white border border-white/15 items-center justify-center backdrop-blur-md transition-all duration-300 hover:scale-110 shadow-2xl"
+            className="hidden lg:flex absolute right-3 top-1/2 -translate-y-1/2 z-30 w-11 h-16 rounded-2xl bg-black/45 hover:bg-[#E50914] text-white border border-white/15 items-center justify-center backdrop-blur-md transition-all duration-300 hover:scale-110 shadow-2xl"
             title="Siguiente destacado"
           >
             <ChevronRight className="w-6 h-6" />
@@ -205,10 +229,10 @@ export default function HeroBanner({
       {/* 4. Información Principal del Billboard con Animación de Entrada Fluida */}
       <div
         key={`content-${currentItem.id}-${activeIndex}-${slideDirection}`}
-        className="absolute bottom-28 sm:bottom-32 left-4 sm:left-8 lg:left-12 max-w-2xl z-20 space-y-3.5 animate-heroContent"
+        className="absolute bottom-24 sm:bottom-28 left-4 sm:left-8 lg:left-12 max-w-2xl z-20 space-y-3.5 animate-heroContent"
       >
         <div className="flex flex-wrap items-center gap-2">
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#E50914]/25 border border-[#E50914]/60 text-red-200 text-xs font-extrabold shadow-lg backdrop-blur-md">
+          <span className="inline-flex items-center gap-1.5 text-white/90 text-xs font-semibold tracking-wide drop-shadow-lg">
             <Sparkles className="w-3.5 h-3.5 text-[#E50914]" />
             <span>{reasonTag}</span>
           </span>
@@ -230,7 +254,7 @@ export default function HeroBanner({
 
           <span className="text-neutral-600">•</span>
 
-          <span className="px-2 py-0.5 bg-[#E50914] text-white rounded text-[10px] font-black uppercase tracking-wider shadow">
+          <span className="px-2 py-0.5 bg-[#E50914] text-white rounded-sm text-[10px] font-black uppercase tracking-wider shadow">
             TOP #{activeIndex + 1} HOY
           </span>
 
@@ -243,9 +267,6 @@ export default function HeroBanner({
 
           {releaseYear && <span className="text-neutral-300 font-semibold">{releaseYear}</span>}
 
-          <span className="border border-white/30 bg-black/30 text-neutral-200 px-1.5 py-0.2 rounded text-[10px] font-bold">
-            Calidad y audio según la fuente
-          </span>
         </div>
 
         <h1 className="text-3xl sm:text-5xl lg:text-6xl font-black text-white tracking-tight drop-shadow-[0_6px_24px_rgba(0,0,0,0.9)] leading-[1.03] line-clamp-2">
@@ -255,33 +276,6 @@ export default function HeroBanner({
         <p className="text-xs sm:text-base text-neutral-200/95 line-clamp-3 max-w-xl drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)] leading-relaxed font-normal">
           {overview}
         </p>
-
-        {onChangeLanguage && (
-          <div className="flex items-center flex-wrap gap-1.5 pt-0.5">
-            <span className="text-[11px] font-semibold text-neutral-400 flex items-center gap-1 mr-1">
-              <Globe className="w-3.5 h-3.5 text-[#E50914]" />
-              Motor de Audio:
-            </span>
-            {LANGUAGE_OPTIONS.map((opt) => {
-              const active = opt.id === preferredLanguage;
-              return (
-                <button
-                  key={opt.id}
-                  type="button"
-                  onClick={() => onChangeLanguage(opt.id)}
-                  className={`px-2.5 py-1 rounded-full text-[11px] font-bold transition-all flex items-center gap-1 border ${
-                    active
-                      ? 'bg-[#E50914] text-white border-red-500 shadow-lg shadow-red-950/60 scale-105'
-                      : 'bg-black/60 hover:bg-black/80 text-neutral-300 border-white/15'
-                  }`}
-                >
-                  <span>{opt.flag}</span>
-                  <span>{opt.shortLabel}</span>
-                </button>
-              );
-            })}
-          </div>
-        )}
 
         <div className="flex items-center flex-wrap gap-3 pt-1.5">
           <button
@@ -298,7 +292,7 @@ export default function HeroBanner({
             className="flex items-center gap-2.5 px-7 sm:px-8 py-3 bg-white hover:bg-neutral-200 text-black font-extrabold text-sm sm:text-base rounded-md shadow-[0_8px_25px_rgba(255,255,255,0.25)] transition-all duration-200 hover:scale-105 active:scale-95"
           >
             <Play className="w-5 h-5 fill-current text-black" />
-            <span>Reproducir · {currentLang.flag} {currentLang.shortLabel}</span>
+            <span>Reproducir</span>
           </button>
 
           <button
@@ -317,10 +311,10 @@ export default function HeroBanner({
                 setShowTrailer(true);
                 setIsMuted((prev) => !prev);
               }}
-              className="flex items-center gap-2 px-4 py-3 rounded-md bg-black/65 hover:bg-black/85 text-white font-bold text-xs sm:text-sm border border-white/25 backdrop-blur-md transition-all hover:scale-105"
+              className="hidden lg:flex items-center gap-2 px-4 py-3 rounded-md bg-black/65 hover:bg-black/85 text-white font-bold text-xs sm:text-sm border border-white/25 backdrop-blur-md transition-all hover:scale-105"
             >
               <Film className="w-4 h-4 text-[#E50914]" />
-              <span>{showTrailer && !isMuted ? 'Silenciar Preview' : '🎬 Preview en Vivo'}</span>
+              <span>{showTrailer && !isMuted ? 'Silenciar avance' : 'Ver avance'}</span>
             </button>
           )}
 
@@ -372,9 +366,9 @@ export default function HeroBanner({
           </button>
         )}
 
-        <div className="bg-black/65 backdrop-blur-md border-l-[3px] border-[#E50914] py-1.5 pl-3 pr-6 text-xs font-bold text-neutral-200 tracking-wider">
-          16+
-        </div>
+        {contentRating?.id === currentItem.id && contentRating.label && <div className="bg-black/75 backdrop-blur-md border-l-[3px] border-[#E50914] py-1.5 pl-3 pr-6 text-xs font-bold text-neutral-200 tracking-wider" title="Clasificación publicada para este título">
+          {contentRating.label}
+        </div>}
       </div>
 
       {/* 5. Tira Inferior de Miniaturas Multi-Slide con Barra de Progreso Animada */}

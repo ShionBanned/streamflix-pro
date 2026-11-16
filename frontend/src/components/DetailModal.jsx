@@ -263,7 +263,7 @@ export default function DetailModal({
           <img
             src={backdropUrl}
             alt={title}
-            className="w-full h-full object-cover object-center filter brightness-90"
+            className="w-full h-full object-cover object-center filter brightness-90 animate-heroBackdrop"
           />
           <div className="absolute inset-0 bg-gradient-to-t from-[#161616] via-[#161616]/45 to-transparent" />
           <div className="absolute inset-0 bg-gradient-to-r from-[#161616]/85 via-transparent to-transparent" />
@@ -346,34 +346,23 @@ export default function DetailModal({
         </div>
 
         {/* Selector de Idioma Dedicado */}
-        <div className="px-6 sm:px-8 pt-2 pb-4 border-b border-white/10 bg-neutral-900/50">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="px-6 sm:px-8 py-3 border-b border-white/10 bg-neutral-900/50">
+          <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <Globe className="w-4 h-4 text-[#E50914]" />
-              <span className="text-xs font-extrabold uppercase tracking-wider text-neutral-300">
-                Motor de Audio Pre-Preparado (Idioma y Subtítulos):
+              <span className="text-xs font-bold text-neutral-300">
+                Idioma preferido
               </span>
             </div>
 
-            <div className="grid grid-cols-2 sm:flex items-center gap-2">
-              {LANGUAGE_OPTIONS.map((opt) => {
-                const isSelected = selectedLang === opt.id;
-                return (
-                  <button
-                    key={opt.id}
-                    onClick={() => handleLanguagePick(opt.id)}
-                    className={`flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${
-                      isSelected
-                        ? 'bg-[#E50914] text-white border-red-500 shadow-lg shadow-red-950/50'
-                        : 'bg-neutral-800/80 hover:bg-neutral-700 text-neutral-300 border-white/10'
-                    }`}
-                  >
-                    <span>{opt.flag}</span>
-                    <span>{opt.label}</span>
-                  </button>
-                );
-              })}
-            </div>
+            <CustomSelect
+              options={LANGUAGE_OPTIONS.map(opt => ({ value: opt.id, label: opt.shortLabel, icon: opt.flag }))}
+              value={selectedLang}
+              onChange={handleLanguagePick}
+              size="sm"
+              align="right"
+              className="max-w-[58%]"
+            />
           </div>
         </div>
 
@@ -384,9 +373,6 @@ export default function DetailModal({
               <div className="flex flex-wrap items-center gap-2.5 text-xs sm:text-sm">
                 <span className="text-emerald-400 font-extrabold">{matchScore}% para ti</span>
                 <span className="text-neutral-300 font-semibold">{releaseYear}</span>
-                <span className="px-1.5 py-0.5 border border-neutral-500 rounded text-neutral-200 text-[10px] font-bold">
-                  Calidad y audio según la fuente
-                </span>
                 {runtime && (
                   <span className="flex items-center gap-1 text-neutral-300">
                     <Clock className="w-3.5 h-3.5" />
@@ -431,12 +417,6 @@ export default function DetailModal({
                   </span>
                 </div>
               )}
-              <div>
-                <span className="text-neutral-500 block">Motores disponibles:</span>
-                <span className="text-emerald-400 font-semibold">
-                  8 Familias Cloud (24+ Espejos) + YTS MP4/AAC + P2P
-                </span>
-              </div>
             </div>
           </div>
 

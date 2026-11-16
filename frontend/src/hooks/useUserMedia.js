@@ -148,6 +148,7 @@ export function computePersonalizedPool({
   nowPlaying = [],
   trending = [],
   sectionItems = [],
+  preferredGenreIds = [],
   maxItems = 8,
 } = {}) {
   const genreWeights = {};
@@ -174,6 +175,7 @@ export function computePersonalizedPool({
   continueWatching.slice(0, 10).forEach((item) => registerItemTaste(item, 4));
   watchlist.slice(0, 12).forEach((item) => registerItemTaste(item, 3));
   tasteHistory.slice(0, 15).forEach((item) => registerItemTaste(item, 2));
+  preferredGenreIds.forEach((id) => { genreWeights[id] = (genreWeights[id] || 0) + 5; });
 
   const nowPlayingIds = new Set((nowPlaying || []).slice(0, 12).map((i) => i.id));
   const trendingIds = new Set((trending || []).slice(0, 12).map((i) => i.id));

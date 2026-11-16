@@ -1,4 +1,5 @@
 import { checkCloudHealth } from './services/cloudHealth.js';
+import { getSiteServers, getResolvedSiteServers, searchSiteTitles } from './services/siteServers.js';
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
@@ -250,10 +251,38 @@ app.get('/api/catalog/:type/:tmdbId/videos', async (req, res) => {
 // -------------------------------------------------------------
 
 app.get('/api/cloud/health', async (req, res) => {
-  const { tmdbId, imdbId, type = 'movie', season = 1, episode = 1, serverId } = req.query;
+  const { tmdbId, imdbId, type = 'movie', season = 1, episode = 1, serverId, mirrorId } = req.query;
   if (!/^\d+$/.test(String(tmdbId || '')) || !['movie', 'tv', 'series'].includes(type) || !/^\d+$/.test(String(season)) || Number(season) < 1 || !/^\d+$/.test(String(episode)) || Number(episode) < 1) return res.status(400).json({ error: 'Identificador o episodio inválido' });
   res.setHeader('Cache-Control', 'no-store');
-  res.json(await checkCloudHealth({ tmdbId, imdbId, isSeries: type !== 'movie', season: Number(season), episode: Number(episode), serverId }));
+  res.json(await checkCloudHealth({ tmdbId, imdbId, isSeries: type !== 'movie', season: Number(season), episode: Number(episode), serverId, mirrorId }));
+});
+
+app.get('/api/site-servers', async (req, res) => {
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(await getSiteServers(req.query.source, req.query.url));
+  } catch (error) {
+    const invalid = /URL|enlace|Fuente|página del título|debe ser/.test(error.message);
+    res.status(invalid ? 400 : 502).json({ error: error.message });
+  }
+});
+
+app.get('/api/site-search', async (req, res) => {
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(await searchSiteTitles(req.query.source, req.query.title));
+  } catch (error) {
+    res.status(/título|Fuente|enlace/.test(error.message) ? 400 : 502).json({ error: error.message });
+  }
+});
+
+app.get('/api/site-resolve', async (req, res) => {
+  try {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(await getResolvedSiteServers(req.query.source, req.query.titleUrl, req.query.season || 1, req.query.episode || 1));
+  } catch (error) {
+    res.status(/URL|enlace|Fuente|inválido|no pertenece|no aparece|temporadas/.test(error.message) ? 400 : 502).json({ error: error.message });
+  }
 });
 
 app.get('/api/resolve', async (req, res) => {

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Sparkles, Check } from 'lucide-react';
+import { Layers3, ChevronRight } from 'lucide-react';
 
 export const PLATFORMS = [
   {
@@ -60,12 +60,12 @@ export const PLATFORMS = [
 
 export default function PlatformHubs({ activeHub, onSelectHub }) {
   return (
-    <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 my-6">
+    <div className="w-full max-w-[1480px] mx-auto px-4 sm:px-8 lg:px-12 my-5">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          <Sparkles className="w-4 h-4 text-amber-400" />
-          <span className="text-xs sm:text-sm font-bold uppercase tracking-wider text-gray-300">
-            Hubs de Streaming
+          <Layers3 className="w-4 h-4 text-[#E50914]" />
+          <span className="text-xs sm:text-sm font-bold text-white">
+            Explorar por plataforma
           </span>
         </div>
         {activeHub && (
@@ -79,30 +79,25 @@ export default function PlatformHubs({ activeHub, onSelectHub }) {
         )}
       </div>
 
-      {/* Grid de 6 Hubs con diseño premium */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 sm:gap-3">
+      <div className="flex gap-2.5 overflow-x-auto no-scrollbar pb-2">
         {PLATFORMS.map((platform) => {
           const isSelected = activeHub?.id === platform.id;
           return (
             <button
               key={platform.id}
               onClick={() => onSelectHub(isSelected ? null : platform)}
-              className={`group relative py-3 px-3.5 rounded-xl border backdrop-blur-md transition-all duration-200 text-left flex items-center justify-between ${
-                platform.bgClass
-              } ${isSelected ? platform.activeClass : ''}`}
+              className={`group relative min-w-[145px] sm:min-w-[172px] py-3 px-3.5 rounded-md border transition-all duration-300 text-left flex items-center justify-between overflow-hidden ${isSelected ? 'bg-[#292929] border-white/70 shadow-lg' : 'bg-[#1b1b1b] border-white/10 hover:bg-[#292929] hover:border-white/30'}`}
             >
+              <span className="absolute left-0 top-0 bottom-0 w-0.5 opacity-70 group-hover:opacity-100 transition-opacity" style={{ backgroundColor: platform.color }} />
               <div>
-                <span className="block text-xs sm:text-sm font-black tracking-wide font-netflix">
+                <span className="block text-xs sm:text-sm font-bold text-white tracking-wide font-netflix">
                   {platform.name}
                 </span>
-                <span className={`text-[10px] font-semibold opacity-80 ${platform.accentText}`}>
-                  {isSelected ? '✓ Activo' : 'Explorar'}
+                <span className="text-[10px] font-medium text-neutral-400">
+                  {isSelected ? 'Seleccionado' : 'Ver títulos'}
                 </span>
               </div>
-
-              <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-black/40 border border-white/10 font-bold">
-                {platform.badge}
-              </span>
+              <ChevronRight className={`w-4 h-4 transition-transform group-hover:translate-x-1 ${isSelected ? 'text-white' : 'text-neutral-500'}`} />
             </button>
           );
         })}
