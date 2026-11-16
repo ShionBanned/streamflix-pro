@@ -26,7 +26,7 @@ test('IPTV parser attributes Colombian channels by tvg-id even in the global pla
 test('hero classification uses the title certification and hides missing ratings', () => {
   const movie = { release_dates: { results: [{ iso_3166_1: 'US', release_dates: [{ certification: 'PG-13' }] }, { iso_3166_1: 'CO', release_dates: [{ certification: '12' }] }] } };
   assert.equal(getContentRating(movie, 'movie'), '12+');
-  assert.equal(getContentRating({ content_ratings: { results: [{ iso_3166_1: 'US', rating: 'TV-MA' }] } }, 'tv'), 'TV-MA');
+  assert.equal(getContentRating({ content_ratings: { results: [{ iso_3166_1: 'US', rating: 'TV-MA' }] } }, 'tv'), '18+');
   assert.equal(getContentRating({}, 'movie'), null);
 });
 
@@ -82,6 +82,7 @@ test('AnimeAV1 category reads embeds but never includes download links', () => {
   const html = 'embeds:{SUB:[{server:"HLS",url:"https://player.zilla-networks.com/play/a"}],LAT:[{server:"Voe",url:"https://voe.sx/e/a"}]},downloads:{SUB:[{server:"Download",url:"https://example.com/file.mp4"}]}';
   const servers = parseAnimeAv1Servers(html);
   assert.deepEqual(servers.map(server => server.name), ['HLS', 'Voe']);
+  assert.deepEqual(servers.map(server => server.pageOnly), [true, false]);
   assert.match(servers[1].audioLabel, /Latino/);
   assert(servers.every(server => !server.url.includes('example.com')));
 });
@@ -97,10 +98,15 @@ test('providers use validated IDs, never substitute an unrelated title, and dedu
   const servers = buildEmbedServers({ tmdbId: 2734, isSeries: true, season: 2, episode: 3 });
   assert.equal(servers.length, 8);
   for (const server of servers) assert.equal(new Set(server.mirrors.map(mirror => mirror.url)).size, server.mirrors.length);
-  assert(servers[0].url.includes('/2734/2-3'));
+  assert(servers[0].url.includes('/2734/2/3'));
   const attempted = new Set([servers[0].mirrors[0].url]);
   const next = nextCloudMirror(servers, servers[0].id, 0, attempted, [{ url: servers[0].mirrors[1].url, status: 'unavailable' }]);
   assert.notEqual(next.url, servers[0].mirrors[1].url);
+  const preferred = nextCloudMirror(servers, servers[0].id, 0, attempted, [
+    { url: servers[0].mirrors[1].url, status: 'challenge' },
+    { url: servers[0].mirrors[2].url, status: 'reachable' },
+  ]);
+  assert.equal(preferred.url, servers[0].mirrors[2].url);
   const all = new Set(servers.flatMap(server => server.mirrors.map(mirror => mirror.url)));
   assert.equal(nextCloudMirror(servers, servers[0].id, 0, all), null);
 });
@@ -109,6 +115,7 @@ test('iframe messages require both the active window and its exact origin and ne
   const frame = { contentWindow: {} }; const expected = 'https://vidsrcme.ru/embed/movie/10';
   const message = { source: frame.contentWindow, origin: 'https://vidsrcme.ru', data: { type: 'PLAYER_EVENT', data: { currentTime: 123, duration: 500 } } };
   assert.equal(readPlayerMessage(message, frame, expected).currentTime, 123);
+  assert.deepEqual(readPlayerMessage({ ...message, data: { type: 'PLAYER_EVENT', data: { player_progress: 125, player_duration: 500, player_status: 'playing' } } }, frame, expected), { currentTime: 125, duration: 500, event: 'playing' });
   assert.equal(readPlayerMessage({ ...message, source: {} }, frame, expected), null);
   assert.equal(readPlayerMessage({ ...message, origin: 'https://evil.example' }, frame, expected), null);
   assert.equal(readPlayerMessage({ ...message, data: { time: Infinity } }, frame, expected), null);

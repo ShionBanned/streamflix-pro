@@ -154,7 +154,7 @@ function NetflixChannelCard({
       onClick={() => onSelect(channel)}
       className={`group relative ${
         isFixedWidth ? 'w-64 sm:w-72 shrink-0' : 'w-full'
-      } rounded-md overflow-hidden bg-gradient-to-br ${themeClass} border cursor-pointer select-none netflix-card-transition ${
+      } tv-channel-card rounded-md overflow-hidden bg-gradient-to-br ${themeClass} border cursor-pointer select-none netflix-card-transition ${
         isActive
           ? 'ring-2 ring-[#E50914] border-[#E50914] shadow-[0_14px_38px_rgba(229,9,20,0.35)]'
           : 'hover:border-white/30'

@@ -16,7 +16,10 @@ export function buildEmbedServers({
   const e = Number.isInteger(Number(episode)) && Number(episode) >= 1 ? Number(episode) : 1;
   const subLang = preferredLanguage === 'en' ? 'en' : 'es';
 
-  // 1. VidSrcMe Ultra (5 espejos oficiales sin bloqueo de reproducción)
+  // VidSrc: los enlaces se comprueban en tiempo de ejecución; una respuesta HTTP no confirma video.
+  const vidsrcSh = isSeries
+    ? `https://vidsrc.sh/embed/tv/${dualId}/${s}/${e}?ds_lang=${subLang}`
+    : `https://vidsrc.sh/embed/movie/${dualId}?ds_lang=${subLang}`;
   const vidsrcMeRu = isSeries
     ? `https://vidsrcme.ru/embed/tv/${cleanTmdb}/${s}-${e}?ds_lang=${subLang}&autoplay=1&autonext=1`
     : `https://vidsrcme.ru/embed/movie/${cleanTmdb}?ds_lang=${subLang}&autoplay=1`;
@@ -114,11 +117,12 @@ export function buildEmbedServers({
   return [
     {
       id: 'vidsrc',
-      name: 'VidSrcMe Ultra (#1)',
-      badge: '5 Espejos • Sub ES',
-      url: vidsrcMeRu,
+      name: 'VidSrc (#1)',
+      badge: 'Subtítulos configurables',
+      url: vidsrcSh,
       mirrors: [
-        { id: 'me-ru', name: 'VidSrcMe.ru (Principal)', url: vidsrcMeRu },
+        { id: 'sh', name: 'VidSrc.sh', url: vidsrcSh },
+        { id: 'me-ru', name: 'VidSrcMe.ru', url: vidsrcMeRu },
         { id: 'in', name: 'VidSrc.in (Mirror 2)', url: vidsrcIn },
         { id: 'net', name: 'VidSrc.net (Mirror 3)', url: vidsrcNet },
         { id: 'pm', name: 'VidSrc.pm (Mirror 4)', url: vidsrcPm },

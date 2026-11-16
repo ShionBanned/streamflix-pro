@@ -188,13 +188,16 @@ export default function HeroBanner({
         <div className="absolute inset-0 w-full h-full overflow-hidden pointer-events-none transition-opacity duration-1000 opacity-100 scale-[1.32] animate-fadeIn">
           <iframe
             key={`yt-${currentItem.id}-${trailerKey}`}
-            src={`https://www.youtube.com/embed/${trailerKey}?autoplay=1&mute=${
+            src={`https://www.youtube-nocookie.com/embed/${trailerKey}?autoplay=1&mute=${
               isMuted ? 1 : 0
-            }&controls=0&loop=1&playlist=${trailerKey}&playsinline=1&modestbranding=1&rel=0&iv_load_policy=3`}
+            }&controls=0&disablekb=1&fs=0&loop=1&playlist=${trailerKey}&playsinline=1&modestbranding=1&rel=0&iv_load_policy=3&cc_load_policy=0`}
             title={`Preview ${title}`}
-            className="w-full h-full border-0 pointer-events-none"
+            tabIndex={-1}
+            aria-hidden="true"
+            className="w-full h-full border-0 pointer-events-none select-none"
             allow="autoplay; encrypted-media"
           />
+          <div className="absolute inset-0 z-10" aria-hidden="true" />
         </div>
       )}
 
@@ -289,7 +292,7 @@ export default function HeroBanner({
                 preferredLanguage
               )
             }
-            className="flex items-center gap-2.5 px-7 sm:px-8 py-3 bg-white hover:bg-neutral-200 text-black font-extrabold text-sm sm:text-base rounded-md shadow-[0_8px_25px_rgba(255,255,255,0.25)] transition-all duration-200 hover:scale-105 active:scale-95"
+            className="hero-primary-cta flex items-center gap-2.5 px-7 sm:px-8 py-3 bg-white hover:bg-neutral-200 text-black font-extrabold text-sm sm:text-base rounded-md shadow-[0_8px_25px_rgba(255,255,255,0.25)] transition-all duration-200 hover:scale-105 active:scale-95"
           >
             <Play className="w-5 h-5 fill-current text-black" />
             <span>Reproducir</span>
@@ -383,7 +386,7 @@ export default function HeroBanner({
                   key={slideItem.id || idx}
                   type="button"
                   onClick={() => handlePickSlide(idx)}
-                  className={`group relative overflow-hidden flex items-center gap-2 px-3.5 py-2 rounded-xl border backdrop-blur-xl transition-all duration-300 shrink-0 ${
+                  className={`hero-slide-chip group relative overflow-hidden flex items-center gap-2 px-3.5 py-2 rounded-xl border backdrop-blur-xl transition-all duration-300 shrink-0 ${
                     isCurrent
                       ? 'bg-[#E50914]/25 border-[#E50914] text-white scale-105 shadow-[0_0_20px_rgba(229,9,20,0.38)]'
                       : 'bg-black/55 hover:bg-black/80 border-white/10 text-neutral-400 hover:text-white'

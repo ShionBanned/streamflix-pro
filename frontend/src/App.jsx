@@ -529,24 +529,35 @@ export default function App() {
     setSearchQuery(query);
     if (!query || !query.trim()) {
       setSearchResults([]);
+      setSearching(false);
       if (activeTab === 'search') setActiveTab('home');
       return;
     }
 
     setActiveTab('search');
+    setSearchResults([]);
     setSearching(true);
-    try {
-      const results = await api.searchMulti(query, 1, tmdbLang);
-      const filtered = (results || []).filter(
-        (i) => (i.media_type === 'movie' || i.media_type === 'tv') && (i.poster_path || i.poster_url)
-      );
-      setSearchResults(filtered);
-    } catch (err) {
-      console.error('Error en búsqueda:', err);
-    } finally {
-      setSearching(false);
-    }
   };
+
+  useEffect(() => {
+    const query = searchQuery.trim();
+    if (!query) return;
+    let current = true;
+    const timer = window.setTimeout(async () => {
+      try {
+        const results = await api.searchMulti(query, 1, tmdbLang);
+        if (!current) return;
+        setSearchResults((results || []).filter(
+          (i) => (i.media_type === 'movie' || i.media_type === 'tv') && (i.poster_path || i.poster_url)
+        ));
+      } catch (err) {
+        if (current) { console.error('Error en búsqueda:', err); setSearchResults([]); }
+      } finally {
+        if (current) setSearching(false);
+      }
+    }, 250);
+    return () => { current = false; window.clearTimeout(timer); };
+  }, [searchQuery, tmdbLang]);
 
   const handleSelectDetails = useCallback(
     (item) => {

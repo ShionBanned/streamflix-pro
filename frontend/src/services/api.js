@@ -387,6 +387,15 @@ export const api = {
     return await cachedGet(`/tmdb/tv/${tvId}/season/${seasonNumber}`, { lang });
   },
 
+  async getCollection(collectionId, lang = 'es-MX') {
+    if (!collectionId) return null;
+    try {
+      return await cachedGet(`/tmdb/collection/${collectionId}`, { lang });
+    } catch {
+      return null;
+    }
+  },
+
   async getAnime(page = 1, lang = 'es-MX') {
     try {
       const data = await cachedGet('/catalog/anime', { page, lang });

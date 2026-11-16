@@ -6,16 +6,12 @@ import {
   Headphones,
   Check,
   ChevronDown,
-  Bell,
 } from 'lucide-react';
 import BrandLogo from './BrandLogo.jsx';
 import { LANGUAGE_OPTIONS, AUDIO_ENGINE_PRESETS } from '../hooks/useUserMedia.js';
 
 /**
- * Navbar.jsx — Barra superior oficial estilo Netflix Web (StreamFlix Pro v5.0)
- * - Alineación izquierda: Logo + enlaces tipográficos limpios (Inicio, Series, Películas, Anime, TV en Vivo, Mi lista)
- * - Eliminación total de la pestaña aislada "Clásicos 80s/90s" (integrados pasivamente en los catálogos)
- * - Alineación derecha: Buscador rectangular expandible estilo Netflix Web, Sorpréndeme, Selector de Motor de Audio Pre-Preparado y Avatar
+ * Navbar.jsx — Barra superior fiel a la identidad visual de Netflix Web
  */
 export default function Navbar({
   activeTab,
@@ -75,27 +71,26 @@ export default function Navbar({
   const currentAudioPreset =
     AUDIO_ENGINE_PRESETS.find((p) => p.id === audioEnginePreset) || AUDIO_ENGINE_PRESETS[0];
 
-  // Enlaces tipográficos limpios estilo Netflix Web (sin pestaña aislada de Clásicos 80s/90s)
   const navItems = [
     { id: 'home', label: 'Inicio' },
     { id: 'series', label: 'Series' },
     { id: 'movies', label: 'Películas' },
-    { id: 'anime', label: 'Anime', badge: 'SIMULCAST' },
-    { id: 'live_tv', label: 'TV en Vivo', isLive: true },
-    { id: 'watchlist', label: 'Mi lista', count: watchlistCount },
+    { id: 'anime', label: 'Anime' },
+    { id: 'live_tv', label: 'TV en Vivo' },
+    { id: 'watchlist', label: 'Mi lista' },
   ];
 
   return (
     <header
-      className={`fixed top-0 left-0 right-0 z-40 transition-all duration-500 ${
+      className={`fixed top-0 left-0 right-0 z-40 transition-colors duration-300 ${
         isScrolled
-          ? 'bg-[#141414]/95 backdrop-blur-2xl shadow-[0_10px_30px_rgba(0,0,0,0.9)] py-3 border-b border-white/[0.06]'
-          : 'bg-gradient-to-b from-black/90 via-black/50 to-transparent py-4'
+          ? 'bg-[#141414]/95 backdrop-blur-md py-3'
+          : 'bg-gradient-to-b from-black/80 via-black/35 to-transparent py-3.5'
       }`}
     >
-      <div className="max-w-[1480px] mx-auto px-4 sm:px-8 lg:px-12 flex items-center justify-between gap-4">
-        {/* Izquierda: Logo + Navegación Tipográfica Estilo Netflix */}
-        <div className="flex items-center gap-6 lg:gap-9">
+      <div className="w-full px-4 sm:px-6 lg:px-[3.2%] flex items-center justify-between gap-4">
+        {/* Izquierda: Wordmark STREAMFLIX + Navegación estilo Netflix */}
+        <div className="flex items-center gap-5 lg:gap-8">
           <button
             type="button"
             onClick={() => {
@@ -104,13 +99,12 @@ export default function Navbar({
               if (onSearch) onSearch('');
               window.scrollTo({ top: 0, behavior: 'smooth' });
             }}
-            className="text-left focus:outline-none shrink-0 transition-transform hover:scale-[1.02]"
+            className="text-left focus:outline-none shrink-0 flex items-center"
           >
             <BrandLogo size="md" showSubtitle={false} />
           </button>
 
-          {/* Enlaces Desktop Estilo Netflix */}
-          <nav className="hidden lg:flex items-center gap-5 xl:gap-6">
+          <nav className="hidden lg:flex items-center gap-2 xl:gap-3">
             {navItems.map((item) => {
               const isActive = activeTab === item.id;
               return (
@@ -121,38 +115,23 @@ export default function Navbar({
                     setActiveTab(item.id);
                     window.scrollTo({ top: 0, behavior: 'smooth' });
                   }}
-                  className={`relative py-1 text-[13.5px] tracking-wide transition-colors duration-200 flex items-center gap-1.5 whitespace-nowrap ${
+                  aria-current={isActive ? 'page' : undefined}
+                  className={`nav-item relative text-[14px] transition-all duration-200 whitespace-nowrap rounded-full ${isActive ? 'nav-item--active' : ''} ${
                     isActive
-                      ? 'text-white font-extrabold'
-                      : 'text-[#e5e5e5]/75 hover:text-[#b3b3b3] font-medium'
+                      ? 'text-white font-semibold px-4 py-1.5'
+                      : 'text-[#e5e5e5]/85 hover:text-white font-normal px-2.5 py-1.5'
                   }`}
                 >
-                  {item.isLive && (
-                    <span className="w-2 h-2 rounded-full bg-[#E50914] animate-pulse shadow-[0_0_8px_#E50914]" />
-                  )}
-                  <span>{item.label}</span>
-                  {item.badge && (
-                    <span className="px-1.5 py-0.2 text-[9px] rounded bg-[#E50914]/20 border border-[#E50914]/50 text-red-300 font-black uppercase tracking-wider">
-                      {item.badge}
-                    </span>
-                  )}
-                  {item.count > 0 && (
-                    <span className="px-1.5 py-0.2 bg-[#E50914] text-white text-[10px] font-black rounded-full">
-                      {item.count}
-                    </span>
-                  )}
-                  {isActive && (
-                    <span className="absolute -bottom-1.5 left-0 right-0 h-[2.5px] bg-[#E50914] rounded-full shadow-[0_0_10px_#E50914]" />
-                  )}
+                  {item.label}
                 </button>
               );
             })}
           </nav>
         </div>
 
-        {/* Derecha: Buscador Rectangular Expandible Netflix + Sorpréndeme + Motor de Audio + Perfil */}
-        <div className="flex items-center gap-2.5 sm:gap-3.5">
-          {/* Buscador Rectangular Expandible idéntico a Netflix Web */}
+        {/* Derecha: Controles minimalistas estilo Netflix */}
+        <div className="flex items-center gap-2 sm:gap-3">
+          {/* Buscador Expandible Netflix */}
           <form onSubmit={handleSearchSubmit} className="relative flex items-center">
             <div
               onClick={() => {
@@ -161,11 +140,11 @@ export default function Navbar({
               }}
               className={`flex items-center transition-all duration-300 ${
                 searchOpen || localQuery
-                  ? 'w-48 sm:w-64 md:w-72 bg-black/90 border border-white/85 px-2.5 py-1.5 shadow-[0_0_20px_rgba(0,0,0,0.85)]'
-                  : 'w-8 h-8 justify-center border border-transparent hover:text-white cursor-pointer'
+                  ? 'w-48 sm:w-64 md:w-72 bg-black/85 border border-white/85 px-2.5 py-1.5'
+                  : 'w-8 h-8 justify-center border border-transparent hover:opacity-80 cursor-pointer'
               }`}
             >
-              <Search className="w-4 h-4 text-white shrink-0" />
+              <Search className="w-5 h-5 text-white shrink-0" strokeWidth={2.2} />
               {(searchOpen || localQuery) && (
                 <>
                   <input
@@ -179,7 +158,7 @@ export default function Navbar({
                     onBlur={() => {
                       if (!localQuery) setSearchOpen(false);
                     }}
-                    placeholder="Títulos, géneros, años 80s/90s..."
+                    placeholder="Títulos, personas, géneros"
                     className="w-full bg-transparent border-none text-xs sm:text-[13px] text-white placeholder-neutral-400 focus:outline-none ml-2.5"
                   />
                   {localQuery && (
@@ -199,46 +178,45 @@ export default function Navbar({
             </div>
           </form>
 
-          {/* Botón "¿Qué veo hoy? / Sorpréndeme" estilo Netflix */}
+          {/* Sorpréndeme (estilo plano limpio) */}
           {onSurpriseMe && (
             <button
               type="button"
               onClick={onSurpriseMe}
-              className="hidden sm:flex items-center gap-1.5 bg-white/[0.08] hover:bg-white/[0.15] border border-white/15 px-3 py-1.5 rounded text-xs font-bold text-white transition-all hover:scale-105"
+              className="hidden sm:flex items-center gap-1.5 px-2.5 py-1.5 rounded-full hover:bg-white/10 text-[13px] font-medium text-[#e5e5e5] hover:text-white transition"
               title="Reproducir o descubrir una recomendación al azar"
             >
-              <Shuffle className="w-3.5 h-3.5 text-[#E50914]" />
+              <Shuffle className="w-4 h-4 text-white/90" />
               <span className="hidden xl:inline">Sorpréndeme</span>
             </button>
           )}
 
-          {/* Selector de Motor de Audio Pre-Preparado + Idioma */}
+          {/* Preferencia de Audio / Idioma (estilo plano limpio) */}
           <div className="relative" ref={audioMenuRef}>
             <button
               type="button"
               onClick={() => setAudioMenuOpen((prev) => !prev)}
-              className="flex items-center gap-1.5 bg-[#181818]/90 hover:bg-[#222222] border border-white/15 hover:border-[#E50914]/60 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-bold text-white transition-all shadow-md"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full hover:bg-white/10 text-[13px] font-medium text-[#e5e5e5] hover:text-white transition"
               title="Motor de Audio Pre-Preparado e Idioma"
             >
-              <Headphones className="w-3.5 h-3.5 text-[#E50914]" />
               <span className="text-sm leading-none">{currentLang.flag}</span>
-              <span className="hidden md:inline text-neutral-200">
+              <span className="hidden md:inline">
                 {currentAudioPreset.shortLabel}
               </span>
               <ChevronDown
-                className={`w-3.5 h-3.5 text-neutral-400 transition-transform duration-200 ${
-                  audioMenuOpen ? 'rotate-180 text-[#E50914]' : ''
+                className={`w-3.5 h-3.5 text-white/80 transition-transform duration-200 ${
+                  audioMenuOpen ? 'rotate-180' : ''
                 }`}
               />
             </button>
 
             {audioMenuOpen && (
-              <div className="absolute right-0 mt-2.5 w-80 bg-[#121212]/98 backdrop-blur-3xl border border-white/15 ring-1 ring-[#E50914]/30 rounded-2xl shadow-[0_24px_65px_rgba(0,0,0,0.95)] p-3 z-50 animate-fadeIn space-y-3">
+              <div className="absolute right-0 mt-2.5 w-80 bg-[#141414]/98 backdrop-blur-2xl border border-white/15 rounded-xl shadow-[0_24px_65px_rgba(0,0,0,0.95)] p-3 z-50 animate-fadeIn space-y-3">
                 <div>
                   <div className="px-2 pb-1.5 border-b border-white/10 flex items-center justify-between">
-                    <span className="text-[10px] font-black uppercase tracking-wider text-red-400 flex items-center gap-1.5">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-neutral-300 flex items-center gap-1.5">
                       <Headphones className="w-3.5 h-3.5 text-[#E50914]" />
-                      🎧 Motor de Audio Pre-Preparado (1 Clic)
+                      Motor de Audio Pre-Preparado
                     </span>
                   </div>
                   <div className="pt-1.5 space-y-1">
@@ -255,18 +233,18 @@ export default function Navbar({
                             }
                             setAudioMenuOpen(false);
                           }}
-                          className={`w-full text-left px-2.5 py-2 rounded-xl transition flex items-start justify-between gap-2 ${
+                          className={`w-full text-left px-2.5 py-2 rounded-lg transition flex items-start justify-between gap-2 ${
                             active
-                              ? 'bg-[#E50914]/25 border border-[#E50914]/60 text-white'
+                              ? 'bg-[#E50914]/20 border border-[#E50914]/60 text-white'
                               : 'hover:bg-white/[0.06] text-neutral-300 border border-transparent'
                           }`}
                         >
                           <div className="flex items-start gap-2">
                             <span className="text-base leading-none mt-0.5">{preset.flag}</span>
                             <div>
-                              <div className="text-xs font-extrabold flex items-center gap-1.5">
+                              <div className="text-xs font-bold flex items-center gap-1.5">
                                 <span>{preset.label}</span>
-                                <span className="text-[9px] px-1.5 py-0.2 rounded bg-white/10 text-neutral-200 font-bold">
+                                <span className="text-[9px] px-1.5 py-0.2 rounded bg-white/10 text-neutral-200 font-semibold">
                                   {preset.badge}
                                 </span>
                               </div>
@@ -283,7 +261,7 @@ export default function Navbar({
                 </div>
 
                 <div className="pt-2 border-t border-white/10">
-                  <span className="px-2 text-[10px] font-extrabold uppercase tracking-wider text-neutral-400 block mb-1.5">
+                  <span className="px-2 text-[10px] font-bold uppercase tracking-wider text-neutral-400 block mb-1.5">
                     Idioma de Interfaz & Metadatos
                   </span>
                   <div className="grid grid-cols-2 gap-1.5">
@@ -297,7 +275,7 @@ export default function Navbar({
                             if (onChangeLanguage) onChangeLanguage(opt.id);
                             setAudioMenuOpen(false);
                           }}
-                          className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 border transition ${
+                          className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 border transition ${
                             active
                               ? 'bg-[#E50914] text-white border-red-400'
                               : 'bg-neutral-900 hover:bg-neutral-800 text-neutral-300 border-white/10'
@@ -314,16 +292,23 @@ export default function Navbar({
             )}
           </div>
 
-          {/* Notificación + Avatar de Perfil Estilo Netflix */}
-          <div className="hidden sm:flex items-center gap-3 pl-1">
+          {/* Avatar de Perfil Estilo Netflix */}
+          <div className="hidden sm:flex items-center pl-1">
             <button
               type="button"
               onClick={() => setActiveTab('profile')}
               aria-label="Abrir Mi Perfil"
               title={profile?.name || 'Mi Perfil'}
-              className="w-9 h-9 rounded bg-gradient-to-br from-[#E50914] to-[#8c060d] flex items-center justify-center text-white font-black text-lg shadow-md border border-white/20 cursor-pointer hover:scale-105 transition overflow-hidden"
+              className="flex items-center gap-1.5 group cursor-pointer focus:outline-none"
             >
-              {profile?.photo ? <img src={profile.photo} alt="" className="w-full h-full object-cover" /> : profile?.avatar || '🎬'}
+              <div className="w-8 h-8 rounded-[4px] bg-[#262626] border border-white/15 flex items-center justify-center text-white text-base overflow-hidden shadow-sm">
+                {profile?.photo ? (
+                  <img src={profile.photo} alt={profile?.name || 'Perfil'} className="w-full h-full object-cover" />
+                ) : (
+                  <span>{profile?.avatar || '🎬'}</span>
+                )}
+              </div>
+              <ChevronDown className="w-3.5 h-3.5 text-white/80 group-hover:rotate-180 transition-transform duration-200" />
             </button>
           </div>
         </div>
@@ -341,19 +326,23 @@ export default function Navbar({
                 setActiveTab(item.id);
                 window.scrollTo({ top: 0, behavior: 'smooth' });
               }}
-              className={`py-2 px-2.5 text-xs font-bold whitespace-nowrap transition-colors relative flex items-center gap-1 ${
-                isActive ? 'text-white font-extrabold' : 'text-neutral-400 hover:text-neutral-200'
+              className={`py-1.5 px-3 text-xs font-semibold whitespace-nowrap transition-colors rounded-full ${
+                isActive ? 'bg-white/20 text-white' : 'text-neutral-400 hover:text-neutral-200'
               }`}
             >
-              {item.isLive && <span className="w-1.5 h-1.5 rounded-full bg-[#E50914] animate-pulse" />}
-              <span>{item.label}</span>
-              {isActive && (
-                <span className="absolute bottom-0 left-2 right-2 h-0.5 bg-[#E50914] rounded-full" />
-              )}
+              {item.label}
             </button>
           );
         })}
-        <button type="button" onClick={() => setActiveTab('profile')} className={`py-2 px-2.5 text-xs font-bold whitespace-nowrap ${activeTab === 'profile' ? 'text-white border-b-2 border-[#E50914]' : 'text-neutral-400'}`}>Mi Perfil</button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('profile')}
+          className={`py-1.5 px-3 text-xs font-semibold whitespace-nowrap rounded-full ${
+            activeTab === 'profile' ? 'bg-white/20 text-white' : 'text-neutral-400'
+          }`}
+        >
+          Mi Perfil
+        </button>
       </nav>
     </header>
   );

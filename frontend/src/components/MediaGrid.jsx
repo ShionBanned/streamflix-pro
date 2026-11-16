@@ -130,7 +130,7 @@ export default function MediaGrid({
     <div ref={sectionRef} className={`relative group/row py-3 px-4 sm:px-6 lg:px-[3.2%] w-full catalog-row ${isVisible ? 'is-visible' : ''}`}>
       {title && (
         <div className="flex items-baseline justify-between mb-2">
-          <h2 className="text-base sm:text-xl font-bold text-[#e5e5e5] tracking-tight">
+          <h2 className="catalog-title text-base sm:text-xl font-bold text-[#e5e5e5] tracking-tight">
             {title.replace(/^[^\p{L}\p{N}]+/u, '')}
           </h2>
           {!isHorizontal && subtitle && (
@@ -144,16 +144,20 @@ export default function MediaGrid({
           <button
             onClick={() => scroll('left')}
             aria-label={`Desplazar ${title} a la izquierda`}
-            className="hidden md:flex absolute left-0 top-10 bottom-3 z-30 w-10 lg:w-12 bg-black/55 hover:bg-black/80 text-white items-center justify-center opacity-0 group-hover/row:opacity-100 transition-opacity duration-200"
+            className="hidden md:flex absolute left-0 top-10 bottom-3 z-30 w-14 bg-gradient-to-r from-black/60 to-transparent items-center justify-start pl-1.5 opacity-0 group-hover/row:opacity-100 transition-opacity duration-200"
           >
-            <ChevronLeft className="w-7 h-7" />
+            <span className="w-7 h-14 rounded-full bg-[#141414]/85 hover:bg-[#262626]/95 border border-white/10 text-white flex items-center justify-center shadow-lg transition-colors">
+              <ChevronLeft className="w-6 h-6" strokeWidth={2.5} />
+            </span>
           </button>
           <button
             onClick={() => scroll('right')}
             aria-label={`Desplazar ${title} a la derecha`}
-            className="hidden md:flex absolute right-0 top-10 bottom-3 z-30 w-10 lg:w-12 bg-black/55 hover:bg-black/80 text-white items-center justify-center opacity-0 group-hover/row:opacity-100 transition-opacity duration-200"
+            className="hidden md:flex absolute right-0 top-10 bottom-3 z-30 w-14 bg-gradient-to-l from-black/60 to-transparent items-center justify-end pr-1.5 opacity-0 group-hover/row:opacity-100 transition-opacity duration-200"
           >
-            <ChevronRight className="w-7 h-7" />
+            <span className="w-7 h-14 rounded-full bg-[#141414]/85 hover:bg-[#262626]/95 border border-white/10 text-white flex items-center justify-center shadow-lg transition-colors">
+              <ChevronRight className="w-6 h-6" strokeWidth={2.5} />
+            </span>
           </button>
         </>
       )}
@@ -197,7 +201,7 @@ export default function MediaGrid({
               <div
                 key={`cw-${itemId}-${item.season}-${item.episode}`}
                 onMouseEnter={() => api.prefetchTitle(item, currentLang.tmdbLang)}
-                className="group relative flex-shrink-0 w-[46vw] sm:w-[30vw] md:w-[22.5vw] lg:w-[18.9%] rounded-[4px] overflow-hidden bg-[#181818] netflix-card-transition cursor-pointer"
+                className="media-card group relative flex-shrink-0 w-[46vw] sm:w-[30vw] md:w-[22.5vw] lg:w-[18.9%] rounded-[4px] overflow-hidden bg-[#181818] netflix-card-transition cursor-pointer"
                 onClick={() =>
                   onPlay(
                     item,
@@ -256,7 +260,7 @@ export default function MediaGrid({
                         >
                           <Info className="w-3.5 h-3.5" />
                         </button>
-                        <div className="w-8 h-8 rounded-full bg-white text-black flex items-center justify-center shadow-lg">
+                        <div className="card-play-icon w-8 h-8 rounded-full bg-white text-black flex items-center justify-center shadow-lg">
                           <Play className="w-4 h-4 fill-current ml-0.5" />
                         </div>
                       </div>
@@ -289,16 +293,18 @@ export default function MediaGrid({
                 <div className="w-[46%] flex items-end justify-end -mr-3 sm:-mr-4 z-0 pointer-events-none">
                   <svg viewBox="0 0 115 160" className="w-full h-full overflow-visible">
                     <text
-                      x={rank === 10 ? '52%' : '56%'}
+                      x={rank === 10 ? '50%' : '56%'}
                       y="150"
                       textAnchor="middle"
                       fill="#141414"
                       stroke="#595959"
-                      strokeWidth="3.5"
-                      fontFamily="Inter, system-ui, sans-serif"
-                      fontWeight="900"
+                      strokeWidth="5"
+                      strokeLinejoin="round"
+                      paintOrder="stroke fill"
+                      fontFamily="'Netflix Sans', 'Inter', system-ui, sans-serif"
+                      fontWeight="700"
                       fontSize={rank === 10 ? '124' : '168'}
-                      letterSpacing="-10"
+                      letterSpacing={rank === 10 ? '-8' : '0'}
                       className="group-hover:stroke-[#E50914] transition-colors duration-300"
                     >
                       {rank}
@@ -333,7 +339,7 @@ export default function MediaGrid({
                           preferredLanguage
                         );
                       }}
-                      className="w-8 h-8 rounded-full bg-white text-black flex items-center justify-center mb-1.5 shadow-lg hover:scale-110 transition-transform"
+                      className="card-play-icon w-8 h-8 rounded-full bg-white text-black flex items-center justify-center mb-1.5 shadow-lg hover:scale-110 transition-transform"
                     >
                       <Play className="w-4 h-4 fill-current ml-0.5" />
                     </button>
@@ -352,7 +358,7 @@ export default function MediaGrid({
             <div
               key={`${itemId}-${index}`}
               onMouseEnter={() => api.prefetchTitle(item, currentLang.tmdbLang)}
-              className={`group relative flex-shrink-0 cursor-pointer rounded-[4px] overflow-hidden bg-[#181818] netflix-card-transition focus-within:ring-2 focus-within:ring-white/80 ${
+              className={`media-card group relative flex-shrink-0 cursor-pointer rounded-[4px] overflow-hidden bg-[#181818] netflix-card-transition focus-within:ring-2 focus-within:ring-white/80 ${
                 isRow ? 'w-[46vw] sm:w-[30vw] md:w-[22.5vw] lg:w-[18.9%]' : 'w-full'
               }`}
               onClick={() => onSelectDetails(item)}
@@ -394,7 +400,7 @@ export default function MediaGrid({
                           preferredLanguage
                         );
                       }}
-                      className="w-8 h-8 rounded-full bg-white text-black hover:bg-neutral-200 flex items-center justify-center shadow-lg transition-transform hover:scale-110 active:scale-90"
+                      className="card-play-icon w-8 h-8 rounded-full bg-white text-black hover:bg-neutral-200 flex items-center justify-center shadow-lg transition-transform hover:scale-110 active:scale-90"
                       title={
                         savedEntry
                           ? `Reanudar en ${formatMinsSec(savedEntry.currentTime)}`

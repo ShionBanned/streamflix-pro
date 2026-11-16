@@ -86,7 +86,8 @@ export default function PlatformHubs({ activeHub, onSelectHub }) {
             <button
               key={platform.id}
               onClick={() => onSelectHub(isSelected ? null : platform)}
-              className={`group relative min-w-[145px] sm:min-w-[172px] py-3 px-3.5 rounded-md border transition-all duration-300 text-left flex items-center justify-between overflow-hidden ${isSelected ? 'bg-[#292929] border-white/70 shadow-lg' : 'bg-[#1b1b1b] border-white/10 hover:bg-[#292929] hover:border-white/30'}`}
+              aria-pressed={isSelected}
+              className={`platform-hub group relative min-w-[145px] sm:min-w-[172px] py-3 px-3.5 rounded-md border transition-all duration-300 text-left flex items-center justify-between overflow-hidden hover:-translate-y-1 hover:shadow-xl ${isSelected ? 'bg-[#292929] border-white/70 shadow-lg' : 'bg-[#1b1b1b] border-white/10 hover:bg-[#292929] hover:border-white/30'}`}
             >
               <span className="absolute left-0 top-0 bottom-0 w-0.5 opacity-70 group-hover:opacity-100 transition-opacity" style={{ backgroundColor: platform.color }} />
               <div>

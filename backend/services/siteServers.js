@@ -197,7 +197,9 @@ export function parseAnimeAv1Servers(html) {
       seen.add(url);
       const languageCode = /^(LAT|LATINO)$/.test(language) ? 'latino' : /^(DUB|DOB|ES)$/.test(language) ? 'doblado' : language === 'SUB' ? 'subtitulado' : language.toLowerCase();
       const audioLabel = languageCode === 'latino' ? 'Latino (indicado por AnimeAV1)' : languageCode === 'doblado' ? 'Doblado (indicado por AnimeAV1)' : languageCode === 'subtitulado' ? 'Subtitulado (indicado por AnimeAV1)' : `${language} (indicado por AnimeAV1)`;
-      servers.push({ id: `animeav1-${servers.length}`, name: String(name || new URL(url).hostname).slice(0, 65), url, audioLabel, languageCode });
+      // El HLS de Zilla exige Referer de AnimeAV1 y responde 403 desde otros orígenes.
+      const pageOnly = new URL(url).hostname === 'player.zilla-networks.com';
+      servers.push({ id: `animeav1-${servers.length}`, name: String(name || new URL(url).hostname).slice(0, 65), url, audioLabel, languageCode, pageOnly });
       if (servers.length >= 30) return servers;
     }
   }

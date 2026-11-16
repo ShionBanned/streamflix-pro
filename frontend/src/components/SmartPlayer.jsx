@@ -120,8 +120,7 @@ export default function SmartPlayer({
   const [siteLoading, setSiteLoading] = useState({});
   const [siteErrors, setSiteErrors] = useState({});
   const [openSiteCategory, setOpenSiteCategory] = useState(null);
-  const [compatibilityUrl, setCompatibilityUrl] = useState(null);
-  const [showCompatibilityPrompt, setShowCompatibilityPrompt] = useState(false);
+  const [embedChoice, setEmbedChoice] = useState({ url: '', mode: '' });
 
   useEffect(() => {
     let saved = {}; let titles = {};
@@ -153,7 +152,17 @@ export default function SmartPlayer({
     return () => controller.abort();
   }, [siteStorageKey, siteTitleStorageKey, currentSeason, currentEpisode, item?.title, item?.name, item?.original_name]);
 
-  // Los iframes ajenos permanecen aislados: no tienen permiso para abrir ventanas ni navegar la página superior.
+  // Mantener la pantalla del reproductor sin scroll mientras está abierta.
+  useEffect(() => {
+    const bodyOverflow = document.body.style.overflow;
+    const htmlOverflow = document.documentElement.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.documentElement.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = bodyOverflow;
+      document.documentElement.style.overflow = htmlOverflow;
+    };
+  }, []);
 
   // Control exacto de tiempo de reanudación ("Continuar Viendo")
   const [resumeOffset, setResumeOffset] = useState(() => Math.floor(Number(initialTime) || 0));
@@ -192,6 +201,8 @@ export default function SmartPlayer({
   const [subtitlePosition, setSubtitlePosition] = useState(() => localStorage.getItem('sf_sub_pos') || 'raised');
   const [subtitleBackdrop, setSubtitleBackdrop] = useState(() => localStorage.getItem('sf_sub_bg') === '1');
   const [subMenuTab, setSubMenuTab] = useState('tracks'); // 'tracks' | 'sync' | 'style'
+  const [audioMenuTab, setAudioMenuTab] = useState('lang'); // 'lang' | 'external' | 'dsp'
+  const [serverMenuTab, setServerMenuTab] = useState('cloud'); // 'cloud' | 'p2p' | 'sites'
   const [showAiSubPanel, setShowAiSubPanel] = useState(false);
   const [cuePreviewIdx, setCuePreviewIdx] = useState(null);
   const manualSubRef = useRef(false);
@@ -202,7 +213,9 @@ export default function SmartPlayer({
   const subtitleOriginalsRef = useRef(new WeakMap());
   const localSubtitleRef = useRef(null);
   const audioTrackManualRef = useRef(false);
-  const [cloudStatus, setCloudStatus] = useState('loading');
+  const [cloudStatus, setCloudStatus] = useState('idle');
+  const [cloudClock, setCloudClock] = useState({ confirmed: false, time: 0, status: 'unknown' });
+  const [cloudAudioActive, setCloudAudioActive] = useState(false);
   const [cloudProbe, setCloudProbe] = useState({ status: 'checking', reason: '' });
   const [cloudHealth, setCloudHealth] = useState([]);
   const [checkingCloud, setCheckingCloud] = useState(false);
@@ -244,15 +257,7 @@ export default function SmartPlayer({
     return () => clearTimeout(timer);
   }, [initialTime, item?.id, currentSeason, currentEpisode]);
 
-  const triggerHudVisibility = useCallback(() => {
-    setShowHud(true);
-    if (hudTimeoutRef.current) clearTimeout(hudTimeoutRef.current);
-    hudTimeoutRef.current = setTimeout(() => {
-      if (!activeDrawer) {
-        setShowHud(false);
-      }
-    }, 2600);
-  }, [activeDrawer]);
+  const triggerHudVisibility = useCallback(() => setShowHud(true), []);
 
   useEffect(() => {
     triggerHudVisibility();
@@ -555,6 +560,7 @@ export default function SmartPlayer({
       cloudProgressConfirmedRef.current = true;
       trackedTimeRef.current = Math.floor(progress.currentTime);
       setCurrentTime(progress.currentTime); setCloudStatus('playing');
+      setCloudClock({ confirmed: true, time: progress.currentTime, status: progress.event || 'playing' });
       if (progress.duration) { trackedDurationRef.current = progress.duration; setDuration(progress.duration); }
     };
     window.addEventListener('message', onMessage);
@@ -1125,10 +1131,10 @@ export default function SmartPlayer({
       episode: currentEpisode,
       preferredLanguage: selectedLanguage,
     });
-    const sites = SITE_SOURCES.filter(source => siteServers[source.id]?.length).map(source => ({
+    const sites = SITE_SOURCES.filter(source => siteServers[source.id]?.some(server => !server.pageOnly)).map(source => ({
       id: source.id, name: source.name, badge: 'Página del título', siteSource: true,
-      mirrors: siteServers[source.id].map(server => ({ id: server.id, name: server.name, url: server.url, audioLabel: server.audioLabel })),
-      url: siteServers[source.id][0].url,
+      mirrors: siteServers[source.id].filter(server => !server.pageOnly).map(server => ({ id: server.id, name: server.name, url: server.url, audioLabel: server.audioLabel })),
+      url: siteServers[source.id].find(server => !server.pageOnly).url,
     }));
     return [...built, ...sites];
   }, [
@@ -1193,7 +1199,7 @@ export default function SmartPlayer({
   const cloudHealthControllerRef = useRef(null);
   const switchCloud = (serverId, index = 0) => {
     setResumeOffset(Math.max(0, Math.floor(trackedTimeRef.current || 0)));
-    setCompatibilityUrl(null); setShowCompatibilityPrompt(false);
+    setEmbedChoice({ url: '', mode: '' });
     setActiveServer(serverId); setActiveMirrorIdx(index);
   };
   const selectSiteTitle = async (source, candidate) => {
@@ -1274,23 +1280,37 @@ export default function SmartPlayer({
     if (next) switchCloud(next.serverId, next.index);
     else { setCloudStatus('exhausted'); setActiveDrawer('servers'); setLaunchMessage({ type: 'error', text: 'No quedan espejos sin probar. Revisa el diagnóstico o elige otra fuente.' }); }
   };
-  const diagnoseCloud = async () => {
+  const diagnoseCloud = async ({ silent = false } = {}) => {
     cloudHealthControllerRef.current?.abort(); const controller = new AbortController(); cloudHealthControllerRef.current = controller;
     setCheckingCloud(true);
     try {
       const response = await axios.get('/api/cloud/health', { params: { tmdbId: item.id || item.tmdbId, imdbId: resolutionData?.imdbId || item.imdb_id || item.imdbId, type: mediaType, season: currentSeason, episode: currentEpisode }, timeout: 45000, signal: controller.signal });
       if (!controller.signal.aborted) setCloudHealth(response.data.results || []);
-    } catch (error) { if (!controller.signal.aborted) setLaunchMessage({ type: 'error', text: 'No se pudo completar el diagnóstico. Comprueba que el backend esté actualizado.' }); }
+    } catch (error) { if (!controller.signal.aborted && !silent) setLaunchMessage({ type: 'error', text: 'No se pudo completar el diagnóstico. Comprueba que el backend esté actualizado.' }); }
     finally { if (!controller.signal.aborted) setCheckingCloud(false); }
   };
-  useEffect(() => () => cloudHealthControllerRef.current?.abort(), [item.id, currentSeason, currentEpisode]);
+  useEffect(() => {
+    if (!(item.id || item.tmdbId)) return;
+    diagnoseCloud({ silent: true });
+    return () => cloudHealthControllerRef.current?.abort();
+  }, [item.id, item.tmdbId, mediaType, currentSeason, currentEpisode, resolutionData?.imdbId]);
   useEffect(() => {
     cloudProgressConfirmedRef.current = false; cloudLastSavedRef.current = null;
-    if (['p2p', 'direct', 'trailer'].includes(activeServer)) return;
+    setCloudClock({ confirmed: false, time: 0, status: 'unknown' });
+    if (['p2p', 'direct', 'trailer'].includes(activeServer) || embedChoice.url !== currentEmbedUrl || !embedChoice.mode) {
+      setCloudStatus('idle');
+      return;
+    }
     setCloudStatus('loading'); attemptedCloudRef.current.add(currentEmbedServerObj?.mirrors?.[activeMirrorIdx]?.url || currentEmbedUrl);
     const timer = setTimeout(() => setCloudStatus(current => current === 'playing' ? current : 'unconfirmed'), 25000);
     return () => clearTimeout(timer);
-  }, [currentEmbedUrl, activeServer]);
+  }, [currentEmbedUrl, activeServer, embedChoice.url, embedChoice.mode]);
+  useEffect(() => {
+    if (!cloudAudioActive || activeServer !== 'vidsrc' || currentEmbedServerObj?.mirrors?.[activeMirrorIdx]?.id !== 'sh' || embedChoice.url !== currentEmbedUrl || !embedChoice.mode) return;
+    const frame = embedFrameRef.current;
+    if (!frame?.contentWindow || !frame.src) return;
+    try { frame.contentWindow.postMessage({ player: true, action: 'mute' }, new URL(frame.src).origin); } catch { /* El proveedor puede haber cambiado de dominio */ }
+  }, [cloudAudioActive, activeServer, activeMirrorIdx, currentEmbedUrl, embedChoice.url, embedChoice.mode, cloudStatus, cloudClock.time]);
   const healthLabels = { reachable: 'Página accesible', unavailable: 'No disponible', 'frame-blocked': 'Bloquea iframe', challenge: 'Requiere verificación', 'invalid-certificate': 'Certificado inválido', redirected: 'Dominio cambió' };
   const torrentLanguages = [...new Set((resolutionData?.streams || []).map(stream => stream.languageCode).filter(Boolean))];
   const visibleTorrentStreams = torrentLanguageFilter === 'all' ? (resolutionData?.streams || []) : (resolutionData?.streams || []).filter(stream => stream.languageCode === torrentLanguageFilter);
@@ -1318,21 +1338,23 @@ export default function SmartPlayer({
   const activeServerLabel =
     activeServer === 'p2p'
       ? `Torrentio P2P (${selectedP2PStream?.resolution || 'HD'})`
+      : activeServer === 'direct'
+      ? 'Enlace directo'
       : activeServer === 'trailer'
       ? 'Tráiler'
-      : currentEmbedServerObj?.name || 'VidSrcMe Ultra (#1)';
-  const cloudSourceBlocked = !['p2p', 'direct', 'trailer'].includes(activeServer) && !currentEmbedServerObj?.siteSource && ['unavailable', 'frame-blocked', 'challenge', 'invalid-certificate', 'redirected'].includes(cloudProbe.status);
-  const cloudSourceChecking = !['p2p', 'direct', 'trailer'].includes(activeServer) && !currentEmbedServerObj?.siteSource && cloudProbe.status === 'checking';
+      : currentEmbedServerObj?.name || 'VidSrc (#1)';
+  const selectedEmbedMode = embedChoice.url === currentEmbedUrl ? embedChoice.mode : '';
   const playerBackdrop = item?.backdrop_url || (item?.backdrop_path ? `https://image.tmdb.org/t/p/w1280${item.backdrop_path}` : null) || item?.poster_url || (item?.poster_path ? `https://image.tmdb.org/t/p/w780${item.poster_path}` : null);
 
   return (
     <div
       id="smart-player-container"
       onMouseMove={triggerHudVisibility}
+      onTouchStart={triggerHudVisibility}
       onClick={() => {
         if (activeDrawer) setActiveDrawer(null);
       }}
-      className="fixed inset-0 z-50 bg-[#080808] overflow-hidden select-none font-netflix animate-fadeIn"
+      className="fixed inset-0 z-50 bg-[#080808] overflow-hidden select-none font-netflix animate-playerReveal"
     >
       <div
         onMouseEnter={triggerHudVisibility}
@@ -1344,9 +1366,9 @@ export default function SmartPlayer({
       <div
         onClick={(e) => e.stopPropagation()}
         className={`absolute top-0 left-0 right-0 z-40 flex flex-col lg:flex-row lg:items-start justify-between gap-2 px-4 py-4 sm:px-6 sm:py-5 bg-gradient-to-b from-black/90 via-black/55 to-transparent pointer-events-none transition-all duration-300 ${
-          showHud || activeDrawer || !['p2p', 'direct', 'trailer'].includes(activeServer)
+          showHud || activeDrawer
             ? 'opacity-100 translate-y-0'
-            : 'opacity-0 -translate-y-4 pointer-events-none'
+            : 'opacity-0 -translate-y-4 invisible pointer-events-none'
         }`}
       >
         <div className="pointer-events-auto flex items-center gap-2 flex-wrap">
@@ -1371,7 +1393,7 @@ export default function SmartPlayer({
             </div>
           </div>
 
-          {activeServer !== 'p2p' && activeServer !== 'trailer' && activeServer !== 'direct' && <span className={`hidden xl:flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium border bg-black/45 ${compatibilityUrl === currentEmbedUrl ? 'text-amber-300 border-amber-500/30' : 'text-neutral-300 border-white/10'}`}><Shield className="w-3.5 h-3.5" /> {compatibilityUrl === currentEmbedUrl ? 'Modo compatible' : 'Reproductor aislado'}</span>}
+          {activeServer !== 'p2p' && activeServer !== 'trailer' && activeServer !== 'direct' && <span className={`hidden xl:flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium border bg-black/45 ${selectedEmbedMode === 'compatible' ? 'text-amber-300 border-amber-500/30' : 'text-neutral-300 border-white/10'}`}><Shield className="w-3.5 h-3.5" /> {selectedEmbedMode === 'compatible' ? 'Modo compatible' : selectedEmbedMode === 'isolated' ? 'Reproductor aislado' : 'Elige modo de reproducción'}</span>}
 
           {showResumeBanner && resumeOffset > 10 && (
             <div className="flex items-center gap-2 bg-emerald-950/90 backdrop-blur-xl border border-emerald-500/40 px-3 py-1.5 rounded-full text-xs text-emerald-200 shadow-lg animate-fadeIn">
@@ -1387,7 +1409,7 @@ export default function SmartPlayer({
           )}
         </div>
 
-        {/* Controles Derecha: Episodios + 🎧 Motor de Audio + 8 Familias Cloud / Torrentio */}
+        {/* Controles Derecha: episodios, audio y fuentes siempre accesibles. */}
         <div className="pointer-events-auto flex items-center gap-2 justify-end min-w-0">
           {isSeries && (
             <>
@@ -1437,7 +1459,7 @@ export default function SmartPlayer({
           >
             <Headphones className="w-3.5 h-3.5 text-neutral-200" />
             <span>{currentLangObj.flag}</span>
-            <span className="hidden sm:inline">Motor de Audio</span>
+            <span className="hidden sm:inline">Audio e idioma</span>
             <ChevronDown className="w-3.5 h-3.5 opacity-75" />
           </button>
 
@@ -1458,441 +1480,557 @@ export default function SmartPlayer({
         </div>
       </div>
 
-      {/* CAJÓN A: 🎧 Panel de Motor de Audio Pre-Preparado con Presets de 1 Clic y DSP WebAudio API */}
-      {(
-        <div
-          onClick={(e) => e.stopPropagation()}
-          className={`absolute top-16 right-4 sm:right-24 z-50 w-[355px] sm:w-[410px] max-w-[94vw] max-h-[82vh] overflow-y-auto bg-[#121212]/98 backdrop-blur-3xl border border-white/15 ring-1 ring-[#E50914]/30 rounded-2xl shadow-[0_25px_70px_rgba(0,0,0,0.95)] p-4 space-y-4 animate-fadeIn ${activeDrawer === 'audio' ? '' : 'hidden'}`}
-        >
-          <div className="flex items-center justify-between pb-2.5 border-b border-white/10">
-            <div>
-              <h3 className="text-xs font-extrabold uppercase tracking-wider text-white flex items-center gap-1.5">
-                <Headphones className="w-4 h-4 text-[#E50914]" />
-                <span>🎧 Motor de Audio Pre-Preparado & DSP</span>
-              </h3>
-              <p className="text-[10px] text-neutral-400 mt-0.5">
-                Preferencias de idioma y controles de audio para fuentes locales
-              </p>
-            </div>
-            <button
-              onClick={() => setActiveDrawer(null)}
-              className="text-neutral-400 hover:text-white p-1"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-
-          <div className="space-y-1.5">
-            <span className="text-[10px] font-extrabold uppercase tracking-wider text-red-400 block">
-              Motores de Audio Listos (1 Clic):
-            </span>
-            {AUDIO_ENGINE_PRESETS.map((preset) => {
-              const active = activeAudioPreset === preset.id;
-              return (
-                <button
-                  key={preset.id}
-                  onClick={() => handleSelectAudioPreset(preset.id)}
-                  className={`w-full text-left p-2.5 rounded-xl border transition-all flex items-start justify-between gap-2 ${
-                    active
-                      ? 'bg-[#E50914]/25 border-[#E50914] text-white shadow-[0_0_15px_rgba(229,9,20,0.25)]'
-                      : 'bg-neutral-900/80 hover:bg-neutral-800 border-white/10 text-neutral-300'
-                  }`}
-                >
-                  <div className="flex items-start gap-2.5">
-                    <span className="text-base leading-none mt-0.5">{preset.flag}</span>
-                    <div>
-                      <div className="text-xs font-extrabold flex items-center gap-1.5">
-                        <span>{preset.label}</span>
-                        <span className="text-[9px] px-1.5 py-0.2 rounded bg-white/10 text-neutral-200 font-bold">
-                          {preset.badge}
-                        </span>
-                      </div>
-                      <p className="text-[10px] text-neutral-400 mt-0.5 leading-snug">
-                        {preset.description}
-                      </p>
-                    </div>
-                  </div>
-                  {active && <Check className="w-4 h-4 text-[#E50914] shrink-0 mt-1" />}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Amplificador DSP WebAudio API */}
-          <fieldset disabled={activeServer !== 'p2p'} className="p-3 rounded-xl bg-black/60 border border-white/10 space-y-3 disabled:opacity-50">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
-                <Sliders className="w-3.5 h-3.5" />
-                <span>Consola DSP · solo reproducción local</span>
-              </span>
-              <button
-                onClick={() => setNightCompressorEnabled((p) => !p)}
-                className={`px-2 py-0.5 rounded text-[9px] font-black uppercase border transition ${
-                  nightCompressorEnabled
-                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50'
-                    : 'bg-neutral-900 text-neutral-400 border-white/10'
-                }`}
-              >
-                Nivelador Vocal {nightCompressorEnabled ? 'ON' : 'OFF'}
-              </button>
-            </div>
-
-            <div className="space-y-1">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-neutral-300 font-semibold">
-                  Potencia de Volumen (GainNode):
-                </span>
-                <span className="text-emerald-400 font-mono font-extrabold">
-                  {audioGainPercent}%
-                </span>
-              </div>
-              <input
-                type="range"
-                min={100}
-                max={250}
-                step={5}
-                value={audioGainPercent}
-                onChange={(e) => {
-                  ensureWebAudioChain();
-                  setAudioGainPercent(Number(e.target.value));
-                }}
-                className="w-full h-1.5 bg-neutral-700 rounded-lg appearance-none cursor-pointer accent-[#E50914]"
-              />
-            </div>
-
-            <div className="space-y-1">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-neutral-300 font-semibold">
-                  Claridad de Diálogos (2.6 kHz EQ):
-                </span>
-                <span className="text-amber-300 font-mono font-extrabold">
-                  +{dialogueBoostDb} dB
-                </span>
-              </div>
-              <input
-                type="range"
-                min={0}
-                max={12}
-                step={1}
-                value={dialogueBoostDb}
-                onChange={(e) => {
-                  ensureWebAudioChain();
-                  setDialogueBoostDb(Number(e.target.value));
-                }}
-                className="w-full h-1.5 bg-neutral-700 rounded-lg appearance-none cursor-pointer accent-[#E50914]"
-              />
-            </div>
-
-            <div className="pt-2 border-t border-white/10 flex items-center justify-between gap-2">
-              <button
-                onClick={() => setForceTranscode((prev) => !prev)}
-                className={`px-2.5 py-1.5 rounded-lg text-[11px] font-extrabold border flex items-center gap-1.5 transition ${
-                  forceTranscode
-                    ? 'bg-[#E50914]/25 text-red-200 border-[#E50914]'
-                    : 'bg-neutral-900 text-neutral-300 border-white/10 hover:border-white/30'
-                }`}
-                title="Convierte pistas Dolby AC-3 / DTS a AAC 2.0 en tiempo real con FFmpeg"
-              >
-                <Cpu className="w-3.5 h-3.5" />
-                <span>Forzar FFmpeg AAC: {forceTranscode ? 'SÍ' : 'AUTO'}</span>
-              </button>
-
-              <div className="flex flex-wrap items-center gap-1">
-                {!torrentStatus?.audioTracks?.length && <span className="text-[10px] text-neutral-400">Las pistas se detectan al convertir la fuente.</span>}
-                {(torrentStatus?.audioTracks || []).map((track, tIdx) => (
-                  <button
-                    key={tIdx}
-                    onClick={() => {
-                      audioTrackManualRef.current = true; setSelectedAudioTrackIdx(tIdx);
-                      syncNativeVideoAudioTrack(selectedLanguage, tIdx);
-                    }}
-                    className={`px-2.5 py-1.5 rounded-lg text-[10px] font-bold border transition ${
-                      selectedAudioTrackIdx === tIdx
-                        ? 'bg-emerald-600/30 text-emerald-300 border-emerald-500'
-                        : 'bg-neutral-900 text-neutral-400 border-white/10'
-                    }`}
-                  >
-                    {track.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </fieldset>
-
-          {activeServer === 'p2p' && selectedP2PStream && <div className="p-3 rounded-xl bg-black/60 border border-white/10 space-y-2"><p className="text-xs text-white font-semibold">Audio externo sincronizado</p><ExternalAudio videoRef={videoRef} videoKey={`${selectedP2PStream.infoHash}-${selectedP2PStream.fileIdx ?? 0}-${forceTranscode}-${selectedAudioTrackIdx}`} /><p className="text-[10px] text-neutral-400">El audio original se silencia. Ajusta el desfase si el archivo tiene una introducción distinta.</p></div>}
-
-          <div className="pt-1 border-t border-white/10">
-            <span className="text-[10px] font-extrabold uppercase tracking-wider text-neutral-400 block mb-1.5">
-              Idioma de Fuentes & Subtítulos:
-            </span>
-            <div className="grid grid-cols-2 gap-1.5">
-              {LANGUAGE_OPTIONS.map((opt) => {
-                const active = selectedLanguage === opt.id;
-                return (
-                  <button
-                    key={opt.id}
-                    onClick={() => handleLanguageChange(opt.id)}
-                    className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-2 border transition ${
-                      active
-                        ? 'bg-[#E50914] text-white border-red-400 shadow'
-                        : 'bg-neutral-900 hover:bg-neutral-800 text-neutral-300 border-white/10'
-                    }`}
-                  >
-                    <span>{opt.flag}</span>
-                    <span className="truncate">{opt.shortLabel}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+      {/* CAJÓN A: Audio e Idioma (Diseño intuitivo con 2 pestañas) */}
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className={`absolute top-16 right-4 sm:right-24 z-50 w-[355px] sm:w-[400px] max-w-[94vw] max-h-[80vh] overflow-hidden flex flex-col bg-[#141414]/98 backdrop-blur-2xl border border-white/15 rounded-2xl shadow-[0_25px_70px_rgba(0,0,0,0.95)] ${activeDrawer === 'audio' ? 'animate-panelEnter' : 'hidden'}`}
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+          <h3 className="text-sm font-bold text-white flex items-center gap-2">
+            <Headphones className="w-4 h-4 text-[#E50914]" />
+            <span>Audio e Idioma</span>
+          </h3>
+          <button onClick={() => setActiveDrawer(null)} className="text-neutral-400 hover:text-white p-1">
+            <X className="w-4 h-4" />
+          </button>
         </div>
-      )}
 
-      {/* CAJÓN B: Centro de 8 Familias Cloud (25 Espejos Sin Error Sandbox) y Torrentio Persistente */}
-      {activeDrawer === 'servers' && (
-        <div
-          onClick={(e) => e.stopPropagation()}
-          className="absolute top-16 right-4 z-50 w-[370px] sm:w-[445px] max-w-[94vw] max-h-[82vh] overflow-y-auto bg-[#121212]/98 backdrop-blur-3xl border border-white/15 ring-1 ring-[#E50914]/30 rounded-2xl shadow-[0_25px_70px_rgba(0,0,0,0.95)] p-4 space-y-4 animate-fadeIn"
-        >
-          <div className="flex items-center justify-between pb-2.5 border-b border-white/10">
-            <div>
-              <h3 className="text-xs font-extrabold uppercase tracking-wider text-white flex items-center gap-1.5">
-                <Server className="w-3.5 h-3.5 text-[#E50914]" />
-                {embedServersList.length} proveedores Cloud y sitios
-              </h3>
-              <p className="text-[10px] text-neutral-400 mt-0.5">Los proveedores externos se abren aislados. Algunos pueden no funcionar con esta protección.</p>
-            </div>
-            <button
-              onClick={() => setActiveDrawer(null)}
-              className="text-neutral-400 hover:text-white p-1"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
+        <div className="grid grid-cols-3 border-b border-white/10 bg-white/[0.02] text-[11px] font-bold">
+          <button
+            onClick={() => setAudioMenuTab('lang')}
+            className={`py-2.5 transition ${audioMenuTab === 'lang' ? 'text-white border-b-2 border-[#E50914] bg-white/[0.04]' : 'text-neutral-400 hover:text-white'}`}
+          >
+            Idioma y Pista
+          </button>
+          <button
+            onClick={() => setAudioMenuTab('external')}
+            className={`py-2.5 transition ${audioMenuTab === 'external' ? 'text-white border-b-2 border-[#E50914] bg-white/[0.04]' : 'text-neutral-400 hover:text-white'}`}
+          >
+            Audio alternativo
+          </button>
+          <button
+            onClick={() => setAudioMenuTab('dsp')}
+            className={`py-2.5 transition ${audioMenuTab === 'dsp' ? 'text-white border-b-2 border-[#E50914] bg-white/[0.04]' : 'text-neutral-400 hover:text-white'}`}
+          >
+            Mejora de sonido
+          </button>
+        </div>
 
-          <div className="space-y-2">
-            <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-400 block">
-              ☁️ Fuentes Cloud · Diagnóstico de disponibilidad
-            </span>
-
-            <div className="flex gap-2 text-xs">
-              <button disabled={checkingCloud} onClick={diagnoseCloud} className="px-3 py-2 bg-neutral-800 rounded-lg disabled:opacity-50">{checkingCloud ? 'Comprobando…' : 'Diagnosticar espejos'}</button>
-              <button onClick={tryNextCloud} className="px-3 py-2 bg-red-700 rounded-lg">Probar siguiente</button>
-            </div>
-            {cloudHealth.length > 0 && <p className="text-[11px] text-neutral-400">{cloudHealth.filter(result => result.status === 'reachable').length} páginas accesibles de {cloudHealth.length}. Una página accesible todavía puede fallar al reproducir el video.</p>}
-            <div className="grid grid-cols-2 gap-1.5">
-              {embedServersList.filter(srv => !srv.siteSource).map((srv) => {
-                const isSelected = activeServer === srv.id;
-                return (
-                  <button
-                    key={srv.id}
-                    onClick={() => {
-                      switchCloud(srv.id, 0);
-                    }}
-                    className={`p-2.5 rounded-xl border text-left transition-all ${
-                      isSelected
-                        ? 'bg-[#E50914]/25 border-[#E50914] text-white shadow'
-                        : 'bg-neutral-900/80 hover:bg-neutral-800 border-white/10 text-neutral-300'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-extrabold truncate">{srv.name}</span>
-                      {isSelected && <Check className="w-3.5 h-3.5 text-[#E50914] shrink-0" />}
-                    </div>
-                    <span className="inline-block mt-1 text-[9px] px-1.5 py-0.2 rounded bg-white/10 text-neutral-300 font-semibold">
-                      {srv.badge}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className="space-y-2 pt-2 border-t border-white/10">
-              {SITE_SOURCES.map(source => {
-                const servers = siteServers[source.id] || [];
-                const languages = [...new Set(servers.map(server => server.languageCode).filter(code => code && code !== 'unknown'))];
-                const visibleServers = siteLanguageFilter[source.id] === 'all' ? servers : servers.filter(server => server.languageCode === siteLanguageFilter[source.id]);
-                const expanded = openSiteCategory === source.id;
-                return <div key={source.id} className="rounded-xl border border-white/10 bg-neutral-900/60 overflow-hidden">
-                  <button type="button" onClick={() => setOpenSiteCategory(expanded ? null : source.id)} className="w-full p-3 flex items-center justify-between text-left hover:bg-neutral-800/60" aria-expanded={expanded}>
-                    <span className="text-xs font-bold text-white">{source.name} <span className="text-neutral-400 font-normal">· {servers.length} servidores</span></span>
-                    <ChevronDown className={`w-4 h-4 text-neutral-400 transition-transform ${expanded ? 'rotate-180' : ''}`} />
-                  </button>
-                  {expanded && <div className="px-3 pb-3 space-y-2">
-                    <p className="text-[10px] text-neutral-400">Busca una vez el título. La temporada y el episodio se resolverán automáticamente.</p>
-                    <div className="flex gap-1.5">
-                      <input type="search" aria-label={`Buscar título en ${source.name}`} value={siteSearchQueries[source.id]} onChange={event => setSiteSearchQueries(current => ({ ...current, [source.id]: event.target.value }))} onKeyDown={event => { if (event.key === 'Enter') searchSiteTitles(source.id); }} placeholder="Nombre de la serie o película" className="min-w-0 flex-1 p-2 rounded-lg bg-black/70 border border-white/20 text-white text-[11px]" />
-                      <button type="button" disabled={siteLoading[source.id] || !siteSearchQueries[source.id]?.trim()} onClick={() => searchSiteTitles(source.id)} className="px-2.5 rounded-lg bg-red-700 text-white text-[11px] font-bold disabled:opacity-50">{siteLoading[source.id] ? 'Buscando…' : 'Buscar'}</button>
-                    </div>
-                    {siteTitlePages[source.id] && <div className="flex items-center justify-between gap-2 rounded-lg bg-emerald-950/30 border border-emerald-500/20 px-2.5 py-2"><span className="text-[10px] text-emerald-200 truncate">Título vinculado · {siteTitlePages[source.id].split('/').pop()}</span><button type="button" onClick={() => clearSiteTitle(source.id)} className="text-[10px] text-neutral-300 hover:text-white shrink-0">Cambiar</button></div>}
-                    {(siteCandidates[source.id] || []).length > 0 && <div className="max-h-40 overflow-y-auto space-y-1">{siteCandidates[source.id].map(candidate => <button key={candidate.titleUrl} type="button" onClick={() => selectSiteTitle(source.id, candidate)} className="w-full rounded-lg border border-white/10 bg-black/45 hover:bg-neutral-800 px-2.5 py-2 text-left"><span className="block text-[11px] font-semibold text-white truncate">{candidate.title}</span><span className="text-[10px] text-neutral-400">{candidate.type === 'movie' ? 'Película' : 'Serie'}{candidate.year ? ` · ${candidate.year}` : ''}</span></button>)}</div>}
-                    {siteLoading[source.id] && <p className="text-[10px] text-neutral-400">Localizando la página y sus reproductores…</p>}
-                    {siteErrors[source.id] && <p role="alert" className="text-[10px] text-amber-300">{siteErrors[source.id]}</p>}
-                    {languages.length > 1 && <label className="flex items-center justify-between text-[10px] text-neutral-300">Idioma anunciado<select value={siteLanguageFilter[source.id]} onChange={event => setSiteLanguageFilter(current => ({ ...current, [source.id]: event.target.value }))} className="rounded bg-black/70 border border-white/20 px-2 py-1 text-white"><option value="all">Todos</option>{languages.map(code => <option key={code} value={code}>{SOURCE_LANGUAGE_LABELS[code] || code}</option>)}</select></label>}
-                    {visibleServers.map(server => <button key={server.id} type="button" onClick={() => switchCloud(source.id, servers.indexOf(server))} className={`w-full p-2.5 rounded-lg border text-left ${activeServer === source.id && activeMirrorIdx === servers.indexOf(server) ? 'bg-red-900/35 border-red-500' : 'bg-black/45 border-white/10 hover:bg-neutral-800'}`}>
-                      <span className="text-xs font-bold text-white">{server.name}</span>
-                      <span className="block text-[10px] text-neutral-400">{server.audioLabel} · {new URL(server.url).hostname}</span>
-                    </button>)}
-                    {servers.length > 0 && <p className="text-[10px] text-neutral-500">El idioma lo anuncia el sitio; se confirma al reproducir.</p>}
-                    <details className="pt-1"><summary className="text-[10px] text-neutral-400 cursor-pointer hover:text-white">Usar enlace manual de episodio o película</summary><div className="flex gap-1.5 mt-2"><input type="url" aria-label={`Página de ${source.name}`} value={sitePageInputs[source.id]} onChange={event => setSitePageInputs(current => ({ ...current, [source.id]: event.target.value }))} placeholder={source.example} className="min-w-0 flex-1 p-2 rounded-lg bg-black/70 border border-white/20 text-white text-[11px]" /><button type="button" disabled={siteLoading[source.id] || !sitePageInputs[source.id]?.trim()} onClick={() => refreshSiteServers(source.id)} className="px-2.5 rounded-lg bg-neutral-700 text-white text-[11px] font-bold disabled:opacity-50">Cargar</button></div></details>
-                  </div>}
-                </div>;
-              })}
-            </div>
-
-            {activeServer !== 'p2p' &&
-              activeServer !== 'trailer' &&
-              !currentEmbedServerObj?.siteSource &&
-              currentEmbedServerObj?.mirrors?.length > 1 && (
-                <div className="p-2.5 rounded-xl bg-black/55 border border-white/10 space-y-2">
-                  <span className="text-[10px] font-bold text-neutral-400 block">
-                    Espejos de {currentEmbedServerObj.name}:
-                  </span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {currentEmbedServerObj.mirrors.map((m, idx) => (
+        <div className="p-4 overflow-y-auto space-y-4">
+          {audioMenuTab === 'lang' ? (
+            <>
+              <div className="space-y-2">
+                <span className="text-xs font-bold text-neutral-300 block">Idioma preferido</span>
+                <p className="text-[11px] text-neutral-400">Esta preferencia prioriza fuentes e idiomas disponibles; no crea un doblaje nuevo.</p>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {LANGUAGE_OPTIONS.map((opt) => {
+                    const active = selectedLanguage === opt.id;
+                    return (
                       <button
-                        key={m.id}
-                        onClick={() => switchCloud(activeServer, idx)}
-                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${
-                          activeMirrorIdx === idx
-                            ? 'bg-emerald-600/30 text-emerald-300 border-emerald-500'
-                            : 'bg-neutral-900 hover:bg-neutral-800 text-neutral-300 border-white/10'
+                        key={opt.id}
+                        onClick={() => handleLanguageChange(opt.id)}
+                        className={`px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-2 border transition ${
+                          active
+                            ? 'bg-[#E50914] text-white border-red-400'
+                            : 'bg-white/5 hover:bg-white/10 text-neutral-300 border-white/10'
                         }`}
                       >
-                        {m.name} · {healthLabels[cloudHealth.find(result => result.url === m.url)?.status] || 'Sin comprobar'}
+                        <span>{opt.flag}</span>
+                        <span className="truncate">{opt.shortLabel}</span>
                       </button>
-                    ))}
-                  </div>
+                    );
+                  })}
                 </div>
-              )}
-          </div>
+              </div>
 
-          <div className="pt-3 border-t border-white/10 space-y-2">
-            <label className="text-xs text-neutral-300 block">Fuente directa · HLS / MP4 / WebM<input type="url" aria-label="URL de fuente directa" value={directInput} onChange={event => setDirectInput(event.target.value)} placeholder="https://tu-servidor/video.m3u8" className="w-full mt-2 p-2 rounded bg-neutral-900 border border-white/20 text-white" /></label>
-            <button onClick={openDirectSource} disabled={!directInput.trim()} className="px-3 py-2 text-xs rounded bg-emerald-700 disabled:opacity-50">Abrir fuente directa</button>
-            {savedDirectSources.length > 0 && <div className="space-y-1"><span className="text-[10px] text-neutral-400">Fuentes guardadas para este título</span>{savedDirectSources.map(url => <div key={url} className="flex gap-1 items-center"><button className="min-w-0 flex-1 truncate rounded bg-neutral-800 px-2 py-1 text-left text-[10px]" title={url} onClick={() => { setDirectUrl(url); setActiveServer('direct'); setActiveDrawer(null); }}>{new URL(url).hostname} · {new URL(url).pathname.split('/').pop() || 'video'}</button><button className="rounded bg-neutral-800 px-2 py-1 text-[10px]" aria-label="Eliminar fuente guardada" onClick={() => { const next = savedDirectSources.filter(value => value !== url); localStorage.setItem(directStorageKey, JSON.stringify(next)); setSavedDirectSources(next); }}>✕</button></div>)}</div>}
-            <p className="text-[10px] text-neutral-400">Para archivos y emisiones a los que tengas acceso. El audio y los subtítulos se controlan en el reproductor local.</p>
-          </div>
-          <div className="pt-2 border-t border-white/10 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-extrabold uppercase tracking-wider text-amber-400">
-                ⚡ YTS MP4/AAC + Torrentio ({
-                  resolvingP2P
-                    ? 'buscando...'
-                    : `${resolutionData?.streams?.length || 0} fuentes`
-                })
-              </span>
-              <button
-                onClick={() => setForceTranscode(!forceTranscode)}
-                className={`px-2 py-0.5 rounded text-[10px] font-bold border flex items-center gap-1 ${
-                  forceTranscode
-                    ? 'bg-emerald-600/30 text-emerald-300 border-emerald-500'
-                    : 'bg-neutral-900 text-neutral-400 border-white/10'
-                }`}
-              >
-                <Cpu className="w-3 h-3" />
-                <span>FFmpeg Remux {forceTranscode ? 'ON' : 'AUTO'}</span>
-              </button>
-            </div>
-
-            {torrentLanguages.length > 1 && <label className="flex items-center justify-between text-[10px] text-neutral-300">Idioma de la fuente<select value={torrentLanguageFilter} onChange={event => setTorrentLanguageFilter(event.target.value)} className="rounded bg-black/70 border border-white/20 px-2 py-1 text-white"><option value="all">Todos</option>{torrentLanguages.map(code => <option key={code} value={code}>{SOURCE_LANGUAGE_LABELS[code] || code}</option>)}</select></label>}
-
-            {resolutionData?.streams?.length > 0 ? (
-              <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                {visibleTorrentStreams.slice(0, 20).map((s, idx) => {
-                  const isCurrentP2P =
-                    activeServer === 'p2p' && selectedP2PStream?.infoHash === s.infoHash;
+              <div className="space-y-1.5">
+                <span className="text-xs font-bold text-neutral-300 block">Modo de reproducción</span>
+                {AUDIO_ENGINE_PRESETS.map((preset) => {
+                  const active = activeAudioPreset === preset.id;
                   return (
-                    <div
-                      key={`${s.infoHash}-${idx}`}
-                      onClick={() => {
-                        setSelectedP2PStream(s);
-                        setForceTranscode(false);
-                        hasSeekedVideoRef.current = false;
-                        setActiveServer('p2p');
-                        setVideoError(false);
-                        setActiveDrawer(null);
-                      }}
-                      className={`p-2 rounded-xl text-xs cursor-pointer transition flex items-center justify-between gap-2 border ${
-                        isCurrentP2P
-                          ? 'bg-[#E50914]/25 border-[#E50914] text-white'
-                          : 'bg-neutral-900/70 hover:bg-neutral-800 border-white/5 text-neutral-300'
+                    <button
+                      key={preset.id}
+                      onClick={() => handleSelectAudioPreset(preset.id)}
+                      className={`w-full text-left px-3 py-2.5 rounded-xl border transition flex items-center justify-between gap-2 ${
+                        active
+                          ? 'bg-[#E50914]/20 border-[#E50914] text-white'
+                          : 'bg-white/[0.04] hover:bg-white/[0.08] border-white/10 text-neutral-300'
                       }`}
                     >
-                      <div className="truncate">
-                        <div className="font-bold truncate flex items-center gap-1.5">
-                          <span>{s.resolution}</span>
-                          <span>•</span>
-                          <span className="text-sky-400">{s.language}</span>
-                          {s.audioGuaranteed || s.browserNative ? (
-                            <span className="px-1.5 py-0.2 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-[9px] rounded font-extrabold">
-                              🔊 Audio según metadatos
-                            </span>
-                          ) : (
-                            <span className="px-1.5 py-0.2 bg-purple-500/20 border border-purple-500/40 text-purple-300 text-[9px] rounded font-bold">
-                              ⚡ MKV / Dual Audio
-                            </span>
-                          )}
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span className="text-base shrink-0">{preset.flag}</span>
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold truncate">{preset.label}</p>
+                          <p className="text-[11px] text-neutral-400 truncate">{preset.description}</p>
                         </div>
-                        <p className="text-[10px] text-neutral-500 truncate mt-0.5">
-                          {s.cleanTitle}
-                        </p>
                       </div>
-                      <span className="text-[10px] text-emerald-400 font-mono font-bold shrink-0">
-                        👤 {s.seeders}
-                      </span>
-                    </div>
+                      {active && <Check className="w-4 h-4 text-[#E50914] shrink-0" />}
+                    </button>
                   );
                 })}
               </div>
+
+              {activeServer === 'p2p' && (
+                <div className="pt-3 border-t border-white/10 space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <p className="text-xs font-bold text-white">¿No se escucha el audio?</p>
+                      <p className="text-[11px] text-neutral-400">Convierte el sonido automáticamente</p>
+                    </div>
+                    <button
+                      onClick={() => setForceTranscode((prev) => !prev)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition shrink-0 ${
+                        forceTranscode
+                          ? 'bg-[#E50914] text-white border-red-400'
+                          : 'bg-white/10 text-neutral-200 border-white/15 hover:bg-white/15'
+                      }`}
+                    >
+                      {forceTranscode ? 'Activado' : 'Automático'}
+                    </button>
+                  </div>
+
+                  {(torrentStatus?.audioTracks || []).length > 0 && (
+                    <div className="space-y-1.5">
+                      <span className="text-[11px] font-semibold text-neutral-400 block">Pistas del archivo</span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {torrentStatus.audioTracks.map((track, tIdx) => (
+                          <button
+                            key={tIdx}
+                            onClick={() => {
+                              audioTrackManualRef.current = true;
+                              setSelectedAudioTrackIdx(tIdx);
+                              syncNativeVideoAudioTrack(selectedLanguage, tIdx);
+                            }}
+                            className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition ${
+                              selectedAudioTrackIdx === tIdx
+                                ? 'bg-emerald-600/30 text-emerald-300 border-emerald-500'
+                                : 'bg-white/5 text-neutral-300 border-white/10 hover:bg-white/10'
+                            }`}
+                          >
+                            {track.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          ) : audioMenuTab === 'dsp' ? (
+            <>
+              <fieldset disabled={activeServer !== 'p2p'} className="space-y-4 disabled:opacity-45">
+                {activeServer !== 'p2p' && (
+                  <p className="text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/25 rounded-lg px-3 py-2">
+                    Estos ajustes aplican cuando reproduces desde fuentes locales/P2P.
+                  </p>
+                )}
+
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-white font-semibold">Amplificar volumen</span>
+                    <span className="text-emerald-400 font-mono font-bold">{audioGainPercent}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={100}
+                    max={250}
+                    step={5}
+                    value={audioGainPercent}
+                    onChange={(e) => {
+                      ensureWebAudioChain();
+                      setAudioGainPercent(Number(e.target.value));
+                    }}
+                    className="w-full h-1.5 bg-neutral-700 rounded-lg appearance-none cursor-pointer accent-[#E50914]"
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-white font-semibold">Resaltar voces y diálogos</span>
+                    <span className="text-amber-300 font-mono font-bold">+{dialogueBoostDb} dB</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={12}
+                    step={1}
+                    value={dialogueBoostDb}
+                    onChange={(e) => {
+                      ensureWebAudioChain();
+                      setDialogueBoostDb(Number(e.target.value));
+                    }}
+                    className="w-full h-1.5 bg-neutral-700 rounded-lg appearance-none cursor-pointer accent-[#E50914]"
+                  />
+                </div>
+
+                <div className="flex items-center justify-between gap-2 pt-1">
+                  <div>
+                    <p className="text-xs font-semibold text-white">Modo noche</p>
+                    <p className="text-[11px] text-neutral-400">Reduce explosiones y nivela voces</p>
+                  </div>
+                  <button
+                    onClick={() => setNightCompressorEnabled((p) => !p)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition ${
+                      nightCompressorEnabled
+                        ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50'
+                        : 'bg-white/5 text-neutral-300 border-white/10 hover:bg-white/10'
+                    }`}
+                  >
+                    {nightCompressorEnabled ? 'Activado' : 'Desactivado'}
+                  </button>
+                </div>
+              </fieldset>
+
+            </>
+          ) : null}
+          <div className={audioMenuTab === 'external' ? 'space-y-3' : 'hidden'}>
+            {activeServer === 'p2p' && selectedP2PStream ? (
+              <div className="p-3 rounded-xl bg-white/[0.04] border border-white/10">
+                <ExternalAudio
+                  videoRef={videoRef}
+                  videoKey={`${selectedP2PStream.infoHash}-${selectedP2PStream.fileIdx ?? 0}-${forceTranscode}-${selectedAudioTrackIdx}`}
+                  sourcePages={sitePageInputs}
+                />
+              </div>
+            ) : activeServer === 'direct' ? (
+              <p className="text-xs text-neutral-300">En el reproductor directo, abre <strong>Audio y subtítulos</strong> en la barra inferior. Allí puedes elegir una pista incluida o cargar un audio externo.</p>
             ) : (
-              <p className="text-[11px] text-neutral-500 italic">
-                {resolvingP2P
-                  ? 'Consultando YTS Direct MP4 y trackers P2P en segundo plano...'
-                  : 'Puedes probar una fuente cloud o añadir una fuente directa.'}
-              </p>
+              <div className="space-y-3">
+                <p className="text-[11px] text-amber-200 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2">Conserva el video Cloud en 4K. Carga una pista de audio directa y silencia el audio inglés dentro del reproductor Cloud. {activeServer === 'vidsrc' && currentEmbedServerObj?.mirrors?.[activeMirrorIdx]?.id === 'sh' ? 'En VidSrc.sh también solicitamos el silencio automáticamente.' : 'Este servidor no permite silenciarlo desde StreamFlix.'}</p>
+                <ExternalAudio videoRef={null} videoKey={currentEmbedUrl} sourcePages={sitePageInputs} cloudClock={cloudClock} onActiveChange={setCloudAudioActive} />
+              </div>
             )}
           </div>
+        </div>
+      </div>
 
-          <div className="pt-2 border-t border-white/10 flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-1.5">
-              {selectedP2PStream && (
-                <>
+      {/* CAJÓN B: Cambiar fuente de video (Diseño intuitivo con 3 pestañas) */}
+      {activeDrawer === 'servers' && (
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="absolute top-16 right-4 z-50 w-[370px] sm:w-[435px] max-w-[94vw] max-h-[80vh] overflow-hidden flex flex-col bg-[#141414]/98 backdrop-blur-2xl border border-white/15 rounded-2xl shadow-[0_25px_70px_rgba(0,0,0,0.95)] animate-panelEnter"
+        >
+          <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+            <div>
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <Server className="w-4 h-4 text-[#E50914]" />
+                <span>Cambiar fuente de video</span>
+              </h3>
+              <p className="text-[11px] text-neutral-400 mt-0.5">
+                Si una fuente falla o carga lento, prueba otra aquí.
+              </p>
+            </div>
+            <button onClick={() => setActiveDrawer(null)} className="text-neutral-400 hover:text-white p-1">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-3 border-b border-white/10 bg-white/[0.02] text-xs font-bold">
+            <button
+              onClick={() => setServerMenuTab('cloud')}
+              className={`py-2.5 transition ${serverMenuTab === 'cloud' ? 'text-white border-b-2 border-[#E50914] bg-white/[0.04]' : 'text-neutral-400 hover:text-white'}`}
+            >
+              Servidores Web
+            </button>
+            <button
+              onClick={() => setServerMenuTab('p2p')}
+              className={`py-2.5 transition ${serverMenuTab === 'p2p' ? 'text-white border-b-2 border-[#E50914] bg-white/[0.04]' : 'text-neutral-400 hover:text-white'}`}
+            >
+              Torrent / HD ({resolutionData?.streams?.length || 0})
+            </button>
+            <button
+              onClick={() => setServerMenuTab('sites')}
+              className={`py-2.5 transition ${serverMenuTab === 'sites' ? 'text-white border-b-2 border-[#E50914] bg-white/[0.04]' : 'text-neutral-400 hover:text-white'}`}
+            >
+              Sitios / URL
+            </button>
+          </div>
+
+          <div className="p-4 overflow-y-auto space-y-3.5">
+            {serverMenuTab === 'cloud' && (
+              <>
+                <div className="flex items-center gap-2">
                   <button
-                    onClick={() => handleLaunchExternal('vlc')}
-                    className="px-2.5 py-1.5 bg-orange-600 hover:bg-orange-500 text-white rounded-lg text-[11px] font-extrabold transition"
+                    onClick={tryNextCloud}
+                    className="flex-1 px-3 py-2 bg-[#E50914] hover:bg-red-700 text-white rounded-lg text-xs font-bold transition"
                   >
-                    Abrir en VLC
+                    Probar siguiente servidor
                   </button>
                   <button
-                    onClick={() => handleLaunchExternal('mpv')}
-                    className="px-2.5 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-white border border-white/15 rounded-lg text-[11px] font-bold transition"
+                    disabled={checkingCloud}
+                    onClick={diagnoseCloud}
+                    className="px-3 py-2 bg-white/10 hover:bg-white/15 text-neutral-200 rounded-lg text-xs font-semibold disabled:opacity-50 transition"
                   >
-                    MPV
+                    {checkingCloud ? 'Comprobando…' : 'Verificar'}
                   </button>
-                </>
-              )}
-              {trailerFallbackKey && (
-                <button
-                  onClick={() => {
-                    setActiveServer('trailer');
-                    setActiveDrawer(null);
-                  }}
-                  className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition flex items-center gap-1 ${
-                    activeServer === 'trailer'
-                      ? 'bg-[#E50914] text-white border-red-500'
-                      : 'bg-neutral-900 hover:bg-neutral-800 text-neutral-300 border-white/10'
-                  }`}
-                >
-                  <Film className="w-3 h-3" />
-                  <span>Tráiler</span>
-                </button>
-              )}
-            </div>
+                </div>
 
-            <div className="flex items-center gap-1.5">
-              {activeServer !== 'p2p' && activeServer !== 'trailer' && activeServer !== 'direct' && <span className="text-[10px] text-emerald-300"><Shield className="inline w-3 h-3" /> Ventanas emergentes bloqueadas por el iframe</span>}
-            </div>
+                {cloudHealth.length > 0 && (
+                  <p className="text-[11px] text-neutral-400">
+                    {cloudHealth.filter((r) => r.status === 'reachable').length} de {cloudHealth.length} páginas respondieron. El video se comprueba al reproducir.
+                  </p>
+                )}
+
+                <div className="grid grid-cols-2 gap-2">
+                  {embedServersList.filter((srv) => !srv.siteSource).map((srv) => {
+                    const isSelected = activeServer === srv.id;
+                    const preferredIndex = srv.mirrors.findIndex(mirror => cloudHealth.some(result => result.url === mirror.url && result.status === 'reachable'));
+                    return (
+                      <button
+                        key={srv.id}
+                        onClick={() => switchCloud(srv.id, Math.max(0, preferredIndex))}
+                        className={`p-2.5 rounded-xl border text-left transition ${
+                          isSelected
+                            ? 'bg-[#E50914]/20 border-[#E50914] text-white'
+                            : 'bg-white/[0.04] hover:bg-white/[0.08] border-white/10 text-neutral-200'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-1">
+                          <span className="text-xs font-bold truncate">{srv.name.replace(/\s*\(#\d+\)/, '')}</span>
+                          {isSelected && <Check className="w-3.5 h-3.5 text-[#E50914] shrink-0" />}
+                        </div>
+                        <span className="inline-block mt-1 text-[10px] text-neutral-400 truncate max-w-full">
+                          {srv.badge}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {activeServer !== 'p2p' &&
+                  activeServer !== 'trailer' &&
+                  !currentEmbedServerObj?.siteSource &&
+                  currentEmbedServerObj?.mirrors?.length > 1 && (
+                    <div className="p-3 rounded-xl bg-white/[0.03] border border-white/10 space-y-2">
+                      <span className="text-[11px] font-semibold text-neutral-300 block">
+                        Enlaces alternativos de {currentEmbedServerObj.name}:
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {currentEmbedServerObj.mirrors.map((m, idx) => (
+                          <button
+                            key={m.id}
+                            onClick={() => switchCloud(activeServer, idx)}
+                            className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${
+                              activeMirrorIdx === idx
+                                ? 'bg-emerald-600/30 text-emerald-300 border-emerald-500'
+                                : 'bg-white/5 hover:bg-white/10 text-neutral-300 border-white/10'
+                            }`}
+                          >
+                            {m.name}{cloudHealth.find(result => result.url === m.url)?.status === 'reachable' ? ' · Página accesible' : cloudHealth.find(result => result.url === m.url)?.status === 'unavailable' ? ' · Sin respuesta' : ''}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+              </>
+            )}
+
+            {serverMenuTab === 'p2p' && (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <button
+                    onClick={() => setForceTranscode(!forceTranscode)}
+                    className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold border flex items-center gap-1.5 transition ${
+                      forceTranscode
+                        ? 'bg-emerald-600/25 text-emerald-300 border-emerald-500'
+                        : 'bg-white/5 text-neutral-300 border-white/10 hover:bg-white/10'
+                    }`}
+                  >
+                    <Cpu className="w-3.5 h-3.5" />
+                    <span>Compatibilidad FFmpeg: {forceTranscode ? 'Activada' : 'Auto'}</span>
+                  </button>
+
+                  {torrentLanguages.length > 1 && (
+                    <select
+                      value={torrentLanguageFilter}
+                      onChange={(e) => setTorrentLanguageFilter(e.target.value)}
+                      className="rounded-lg bg-black/70 border border-white/15 px-2 py-1 text-[11px] text-white"
+                    >
+                      <option value="all">Todos los idiomas</option>
+                      {torrentLanguages.map((code) => (
+                        <option key={code} value={code}>
+                          {SOURCE_LANGUAGE_LABELS[code] || code}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+
+                {resolutionData?.streams?.length > 0 ? (
+                  <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">
+                    {visibleTorrentStreams.slice(0, 20).map((s, idx) => {
+                      const isCurrentP2P =
+                        activeServer === 'p2p' && selectedP2PStream?.infoHash === s.infoHash;
+                      return (
+                        <button
+                          key={`${s.infoHash}-${idx}`}
+                          onClick={() => {
+                            setSelectedP2PStream(s);
+                            setForceTranscode(false);
+                            hasSeekedVideoRef.current = false;
+                            setActiveServer('p2p');
+                            setVideoError(false);
+                            setActiveDrawer(null);
+                          }}
+                          className={`w-full text-left p-2.5 rounded-xl text-xs transition flex items-center justify-between gap-2 border ${
+                            isCurrentP2P
+                              ? 'bg-[#E50914]/20 border-[#E50914] text-white'
+                              : 'bg-white/[0.04] hover:bg-white/[0.08] border-white/10 text-neutral-200'
+                          }`}
+                        >
+                          <div className="min-w-0">
+                            <div className="font-bold flex items-center gap-1.5 flex-wrap">
+                              <span>{s.resolution}</span>
+                              <span>•</span>
+                              <span className="text-sky-400">{s.language}</span>
+                              <span className="px-1.5 py-0.2 bg-white/10 text-[10px] rounded font-semibold">
+                                {s.audioGuaranteed || s.browserNative ? 'Listo para navegador' : 'MKV Multi-Audio'}
+                              </span>
+                            </div>
+                            <p className="text-[10px] text-neutral-400 truncate mt-0.5">{s.cleanTitle}</p>
+                          </div>
+                          <span className="text-[11px] text-emerald-400 font-mono font-bold shrink-0">
+                            {s.seeders} 👤
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-xs text-neutral-400 py-4 text-center">
+                    {resolvingP2P
+                      ? 'Buscando fuentes Torrent / YTS en segundo plano…'
+                      : 'No hay fuentes P2P disponibles para este título.'}
+                  </p>
+                )}
+
+                {selectedP2PStream && (
+                  <div className="flex items-center gap-2 pt-2 border-t border-white/10">
+                    <button
+                      onClick={() => handleLaunchExternal('vlc')}
+                      className="flex-1 py-2 bg-orange-600 hover:bg-orange-500 text-white rounded-lg text-xs font-bold transition"
+                    >
+                      Abrir en VLC
+                    </button>
+                    <button
+                      onClick={() => handleLaunchExternal('mpv')}
+                      className="px-4 py-2 bg-white/10 hover:bg-white/15 text-white rounded-lg text-xs font-bold transition"
+                    >
+                      MPV
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {serverMenuTab === 'sites' && (
+              <div className="space-y-3">
+                {SITE_SOURCES.map((source) => {
+                  const servers = siteServers[source.id] || [];
+                  const languages = [...new Set(servers.map((server) => server.languageCode).filter((code) => code && code !== 'unknown'))];
+                  const visibleServers = siteLanguageFilter[source.id] === 'all' ? servers : servers.filter((server) => server.languageCode === siteLanguageFilter[source.id]);
+                  const expanded = openSiteCategory === source.id;
+                  return (
+                    <div key={source.id} className="rounded-xl border border-white/10 bg-white/[0.03] overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => setOpenSiteCategory(expanded ? null : source.id)}
+                        className="w-full p-3 flex items-center justify-between text-left hover:bg-white/[0.05]"
+                      >
+                        <span className="text-xs font-bold text-white">
+                          {source.name} <span className="text-neutral-400 font-normal">· {servers.length} opciones</span>
+                        </span>
+                        <ChevronDown className={`w-4 h-4 text-neutral-400 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+                      </button>
+                      {expanded && (
+                        <div className="px-3 pb-3 space-y-2">
+                          <div className="flex gap-1.5">
+                            <input
+                              type="search"
+                              value={siteSearchQueries[source.id]}
+                              onChange={(e) => setSiteSearchQueries((c) => ({ ...c, [source.id]: e.target.value }))}
+                              onKeyDown={(e) => { if (e.key === 'Enter') searchSiteTitles(source.id); }}
+                              placeholder="Buscar título..."
+                              className="min-w-0 flex-1 p-2 rounded-lg bg-black/70 border border-white/15 text-white text-xs"
+                            />
+                            <button
+                              type="button"
+                              disabled={siteLoading[source.id] || !siteSearchQueries[source.id]?.trim()}
+                              onClick={() => searchSiteTitles(source.id)}
+                              className="px-3 rounded-lg bg-[#E50914] text-white text-xs font-bold disabled:opacity-50"
+                            >
+                              {siteLoading[source.id] ? '…' : 'Buscar'}
+                            </button>
+                          </div>
+                          {siteTitlePages[source.id] && (
+                            <div className="flex items-center justify-between gap-2 rounded-lg bg-emerald-950/30 border border-emerald-500/20 px-2.5 py-1.5 text-[11px] text-emerald-200">
+                              <span className="truncate">Vinculado: {siteTitlePages[source.id].split('/').pop()}</span>
+                              <button type="button" onClick={() => clearSiteTitle(source.id)} className="text-neutral-300 hover:text-white shrink-0">Cambiar</button>
+                            </div>
+                          )}
+                          {(siteCandidates[source.id] || []).length > 0 && (
+                            <div className="max-h-36 overflow-y-auto space-y-1">
+                              {siteCandidates[source.id].map((candidate) => (
+                                <button key={candidate.titleUrl} type="button" onClick={() => selectSiteTitle(source.id, candidate)} className="w-full rounded-lg border border-white/10 bg-black/45 hover:bg-white/10 px-2.5 py-2 text-left">
+                                  <span className="block text-xs font-semibold text-white truncate">{candidate.title}</span>
+                                  <span className="text-[10px] text-neutral-400">{candidate.type === 'movie' ? 'Película' : 'Serie'}{candidate.year ? ` · ${candidate.year}` : ''}</span>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                          {siteErrors[source.id] && <p className="text-[11px] text-amber-300">{siteErrors[source.id]}</p>}
+                          {languages.length > 1 && (
+                            <select value={siteLanguageFilter[source.id]} onChange={(e) => setSiteLanguageFilter((c) => ({ ...c, [source.id]: e.target.value }))} className="w-full rounded-lg bg-black/70 border border-white/15 px-2 py-1.5 text-xs text-white">
+                              <option value="all">Todos los idiomas</option>
+                              {languages.map((code) => <option key={code} value={code}>{SOURCE_LANGUAGE_LABELS[code] || code}</option>)}
+                            </select>
+                          )}
+                          {visibleServers.map((server) => (
+                            <button key={server.id} type="button" onClick={() => { if (server.pageOnly) { if (sitePageInputs[source.id]) window.open(sitePageInputs[source.id], '_blank', 'noopener,noreferrer'); } else switchCloud(source.id, servers.filter(entry => !entry.pageOnly).indexOf(server)); }} className={`w-full p-2 rounded-lg border text-left ${activeServer === source.id && activeMirrorIdx === servers.filter(entry => !entry.pageOnly).indexOf(server) && !server.pageOnly ? 'bg-[#E50914]/20 border-[#E50914]' : 'bg-black/45 border-white/10 hover:bg-white/10'}`}>
+                              <span className="text-xs font-bold text-white block">{server.name}</span>
+                              <span className="text-[10px] text-neutral-400">{server.audioLabel}{server.pageOnly ? ' · Abrir en AnimeAV1 (requiere su página)' : ''}</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+
+                <div className="pt-2 border-t border-white/10 space-y-2">
+                  <label className="text-xs font-semibold text-neutral-300 block">
+                    Pegar enlace directo (.m3u8 o .mp4)
+                    <input
+                      type="url"
+                      value={directInput}
+                      onChange={(e) => setDirectInput(e.target.value)}
+                      placeholder="https://tu-servidor/video.m3u8"
+                      className="w-full mt-1.5 p-2 rounded-lg bg-black/70 border border-white/15 text-white text-xs"
+                    />
+                  </label>
+                  <button
+                    onClick={openDirectSource}
+                    disabled={!directInput.trim()}
+                    className="w-full py-2 text-xs font-bold rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white disabled:opacity-50 transition"
+                  >
+                    Reproducir enlace directo
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {trailerFallbackKey && (
+              <button
+                onClick={() => {
+                  setActiveServer('trailer');
+                  setActiveDrawer(null);
+                }}
+                className="w-full py-2 rounded-lg bg-white/5 hover:bg-white/10 text-xs font-semibold text-neutral-300 flex items-center justify-center gap-1.5 border border-white/10"
+              >
+                <Film className="w-3.5 h-3.5" />
+                <span>Ver tráiler en su lugar</span>
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -1901,7 +2039,7 @@ export default function SmartPlayer({
       {activeDrawer === 'episodes' && isSeries && (
         <div
           onClick={(e) => e.stopPropagation()}
-          className="absolute top-16 right-4 sm:right-16 z-50 w-[350px] sm:w-[420px] max-w-[94vw] max-h-[80vh] flex flex-col bg-[#121212]/98 backdrop-blur-3xl border border-white/15 ring-1 ring-[#E50914]/30 rounded-2xl shadow-[0_25px_70px_rgba(0,0,0,0.95)] p-4 animate-fadeIn"
+          className="absolute top-16 right-4 sm:right-16 z-50 w-[350px] sm:w-[420px] max-w-[94vw] max-h-[80vh] flex flex-col bg-[#121212]/98 backdrop-blur-3xl border border-white/15 ring-1 ring-[#E50914]/30 rounded-2xl shadow-[0_25px_70px_rgba(0,0,0,0.95)] p-4 animate-panelEnter"
         >
           <div className="flex items-center justify-between pb-3 border-b border-white/10">
             <div className="flex items-center gap-2">
@@ -1996,7 +2134,7 @@ export default function SmartPlayer({
       {/* LIENZO DE VIDEO 100% PANTALLA COMPLETA */}
       <div className="relative w-full h-full bg-black flex items-center justify-center">
         {activeServer === 'direct' && directUrl ? (
-          <React.Suspense fallback={<p className="text-white text-sm">Preparando reproductor directo…</p>}><DirectPlayer url={directUrl} initialTime={resumeOffset} onProgress={progress => { cloudProgressConfirmedRef.current = true; trackedTimeRef.current = progress.currentTime; trackedDurationRef.current = progress.duration; }} /></React.Suspense>
+          <React.Suspense fallback={<p className="text-white text-sm">Preparando reproductor directo…</p>}><DirectPlayer url={directUrl} initialTime={resumeOffset} sourcePages={sitePageInputs} onProgress={progress => { cloudProgressConfirmedRef.current = true; trackedTimeRef.current = progress.currentTime; trackedDurationRef.current = progress.duration; }} /></React.Suspense>
         ) : activeServer === 'trailer' && trailerFallbackKey ? (
           <iframe
             key={`trailer-${trailerFallbackKey}`}
@@ -2536,30 +2674,28 @@ export default function SmartPlayer({
               </div>
             </div>
           </div>
-        ) : cloudSourceChecking || cloudSourceBlocked ? (
-          <div className="absolute inset-0 flex items-center justify-center overflow-hidden bg-[#0b0b0b]">
-            {playerBackdrop && <img src={playerBackdrop} alt="" className="absolute inset-0 w-full h-full object-cover opacity-25 blur-xl scale-110" />}
-            <div className="absolute inset-0 bg-gradient-to-t from-black via-black/75 to-black/60" />
-            <div role="status" className="relative z-10 max-w-lg mx-5 text-center space-y-4 animate-fadeIn">
-              <div className="mx-auto w-14 h-14 rounded-full border border-white/15 bg-white/5 flex items-center justify-center">
-                {cloudSourceChecking ? <div className="w-6 h-6 rounded-full border-2 border-red-600/30 border-t-red-500 animate-spin" /> : <AlertTriangle className="w-6 h-6 text-red-400" />}
+        ) : !selectedEmbedMode ? (
+          <div className="absolute inset-0 flex items-center justify-center bg-[#0b0b0b] px-5">
+            {playerBackdrop && <img src={playerBackdrop} alt="" className="absolute inset-0 h-full w-full object-cover opacity-15 blur-xl" />}
+            <div className="relative z-10 max-w-lg rounded-2xl border border-white/15 bg-black/85 p-6 text-center text-white shadow-2xl space-y-4 animate-panelEnter">
+              <Shield className="mx-auto h-8 w-8 text-amber-300" />
+              <h2 className="text-xl font-bold">Elegir modo de reproducción</h2>
+              <p className="text-sm leading-relaxed text-neutral-300">Este proveedor usa su propio reproductor. Sin aislamiento puede abrir anuncios o ventanas; esta página no puede bloquearlos dentro de un iframe externo.</p>
+              <p className="text-xs leading-relaxed text-neutral-400">Si tienes uBlock Origin Lite, activa el filtrado completo desde su icono en el navegador para proteger la reproducción compatible.</p>
+              {cloudProbe.status !== 'unknown' && cloudProbe.status !== 'reachable' && <p className="text-xs text-amber-200">Diagnóstico orientativo: {cloudProbe.status === 'checking' ? 'comprobando el enlace…' : cloudProbe.reason || 'no se pudo comprobar el enlace'}. Puedes intentar reproducirlo en el navegador.</p>}
+              <div className="flex flex-wrap justify-center gap-2">
+                <button type="button" disabled={!currentEmbedUrl} onClick={() => setEmbedChoice({ url: currentEmbedUrl, mode: 'compatible' })} className="rounded-md bg-amber-500 px-4 py-2.5 text-sm font-bold text-black hover:bg-amber-400 disabled:opacity-50">Reproducir sin sandbox</button>
+                <button type="button" disabled={!currentEmbedUrl} onClick={() => setEmbedChoice({ url: currentEmbedUrl, mode: 'isolated' })} className="rounded-md bg-white/15 px-4 py-2.5 text-sm font-semibold hover:bg-white/25 disabled:opacity-50">Probar aislado</button>
               </div>
-              <div className="space-y-2">
-                <p className="text-[11px] uppercase tracking-[0.22em] font-bold text-red-400">{cloudSourceChecking ? 'Comprobando fuente' : 'Fuente no disponible'}</p>
-                <h2 className="text-xl sm:text-3xl font-bold text-white">{cloudSourceChecking ? 'Preparando la reproducción' : 'Este servidor no puede reproducirse aquí'}</h2>
-                <p className="text-sm text-neutral-300">{cloudSourceChecking ? 'Verificando la página antes de abrir el reproductor.' : cloudProbe.reason || 'Prueba otra fuente para este título.'}</p>
-              </div>
-              {!cloudSourceChecking && <div className="flex flex-wrap items-center justify-center gap-2">
-                <button onClick={tryNextCloud} className="px-5 py-2.5 rounded-md bg-white text-black hover:bg-neutral-200 text-sm font-bold transition">Probar siguiente</button>
-                <button onClick={() => setActiveDrawer('servers')} className="px-5 py-2.5 rounded-md bg-white/15 text-white hover:bg-white/25 text-sm font-bold transition">Elegir servidor</button>
-              </div>}
+              <button type="button" onClick={() => { setServerMenuTab('sites'); setActiveDrawer('servers'); }} className="block mx-auto text-xs font-semibold text-white underline underline-offset-4 hover:text-[#E50914]">Usar reproductor StreamFlix con enlace directo</button>
+              <button type="button" onClick={() => setActiveDrawer('servers')} className="text-xs text-neutral-400 underline hover:text-white">Elegir otro servidor</button>
             </div>
           </div>
         ) : (
-          /* El aislamiento se retira solo para la URL que el usuario autorizó en esta sesión. */
+          /* El servidor sin sandbox se carga solo tras una elección explícita del usuario. */
           <iframe
             ref={embedFrameRef}
-            key={`${activeServer}-${activeMirrorIdx}-${selectedLanguage}-${resumeOffset}-${compatibilityUrl === currentEmbedUrl ? 'compatible' : 'aislado'}`}
+            key={`${activeServer}-${activeMirrorIdx}-${selectedLanguage}-${resumeOffset}-${selectedEmbedMode}`}
             onLoad={() => setCloudStatus(current => current === 'playing' ? current : 'loaded')}
             onError={() => setCloudStatus('error')}
             src={currentEmbedUrl}
@@ -2567,36 +2703,18 @@ export default function SmartPlayer({
             className="w-full h-full border-0"
             allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
             referrerPolicy="no-referrer"
-            sandbox={compatibilityUrl === currentEmbedUrl ? undefined : 'allow-scripts allow-presentation'}
+            sandbox={selectedEmbedMode === 'isolated' ? 'allow-scripts allow-same-origin allow-forms allow-presentation' : undefined}
             allowFullScreen
           />
         )}
-        {activeServer !== 'p2p' && activeServer !== 'direct' && activeServer !== 'trailer' && !cloudSourceBlocked && !cloudSourceChecking && <div className="absolute bottom-0 inset-x-0 z-30 px-4 sm:px-7 pt-12 pb-4 sm:pb-6 bg-gradient-to-t from-black/90 via-black/55 to-transparent pointer-events-none">
-          <div className="flex flex-wrap items-end justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-[10px] uppercase tracking-[0.2em] text-neutral-400 font-bold">Reproduciendo con {activeServerLabel}</p>
-              <p className="text-sm sm:text-lg font-semibold text-white truncate max-w-[65vw]">{title}{isSeries ? ` · T${currentSeason}:E${currentEpisode}` : ''}</p>
-              {['unconfirmed', 'error', 'exhausted'].includes(cloudStatus) && <p className="text-[11px] text-amber-300">No se confirmó el video. Puedes cambiar de servidor.</p>}
-              {compatibilityUrl === currentEmbedUrl && <p className="text-[11px] text-amber-300">Modo compatible activo: el proveedor puede mostrar anuncios o abrir ventanas.</p>}
-            </div>
-            <div className="flex items-center gap-2 pointer-events-auto">
-              {compatibilityUrl === currentEmbedUrl
-                ? <button onClick={() => setCompatibilityUrl(null)} className="px-3 py-2 rounded-md bg-amber-900/45 hover:bg-amber-900/70 border border-amber-500/35 text-amber-100 text-xs font-semibold transition">Volver a aislar</button>
-                : <button onClick={() => setShowCompatibilityPrompt(true)} className="px-3 py-2 rounded-md bg-white/15 hover:bg-white/25 border border-white/15 text-white text-xs font-semibold transition">Modo compatible</button>}
-              <button onClick={tryNextCloud} className="px-3 py-2 rounded-md bg-white/15 hover:bg-white/25 border border-white/15 text-white text-xs font-semibold transition">Siguiente fuente</button>
-              <button onClick={() => setActiveDrawer('servers')} className="px-3 py-2 rounded-md bg-white/15 hover:bg-white/25 border border-white/15 text-white text-xs font-semibold transition">Servidores</button>
-            </div>
-          </div>
+        {activeServer !== 'p2p' && activeServer !== 'direct' && activeServer !== 'trailer' && selectedEmbedMode && <div onMouseEnter={triggerHudVisibility} onClick={event => event.stopPropagation()} className={`absolute bottom-4 right-4 sm:bottom-6 sm:right-6 z-40 max-w-[calc(100vw-2rem)] flex flex-wrap justify-end gap-1.5 rounded-xl border border-white/10 bg-black/75 p-1.5 shadow-2xl backdrop-blur-xl transition-all duration-300 ${showHud || activeDrawer ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-3 pointer-events-none'}`}>
+              {selectedEmbedMode === 'isolated'
+                ? <button onClick={() => setEmbedChoice({ url: currentEmbedUrl, mode: 'compatible' })} className="px-2.5 py-1.5 rounded-lg hover:bg-amber-900/60 text-amber-200 text-xs font-semibold transition" title="Puede mostrar anuncios o abrir ventanas">Modo compatible</button>
+                : <button onClick={() => setEmbedChoice({ url: currentEmbedUrl, mode: 'isolated' })} className="px-2.5 py-1.5 rounded-lg hover:bg-white/15 text-white text-xs font-semibold transition">Aislar</button>}
+              <button onClick={tryNextCloud} className="px-2.5 py-1.5 rounded-lg hover:bg-white/15 text-white text-xs font-semibold transition">Siguiente fuente</button>
+              <button onClick={() => setActiveDrawer('servers')} className="px-2.5 py-1.5 rounded-lg bg-[#E50914] hover:bg-red-700 text-white text-xs font-semibold transition">Servidores</button>
         </div>}
       </div>
-      {showCompatibilityPrompt && <div role="dialog" aria-modal="true" aria-labelledby="compatibility-title" onClick={event => event.stopPropagation()} className="absolute inset-0 z-[70] flex items-center justify-center bg-black/85 px-5">
-        <div className="w-full max-w-md rounded-2xl border border-amber-500/30 bg-[#1b1b1b] p-6 shadow-2xl space-y-4">
-          <div className="flex items-center gap-3 text-amber-300"><AlertTriangle className="h-6 w-6 shrink-0" /><h2 id="compatibility-title" className="text-lg font-bold text-white">Abrir este servidor en modo compatible</h2></div>
-          <p className="text-sm leading-relaxed text-neutral-300">Este proveedor rechaza el aislamiento del reproductor. Al continuar podrá mostrar anuncios o abrir ventanas emergentes. Actívalo solo si confías en esta fuente.</p>
-          <p className="text-xs text-neutral-400">Se aplicará únicamente a este servidor durante esta sesión.</p>
-          <div className="flex justify-end gap-2 pt-2"><button type="button" onClick={() => setShowCompatibilityPrompt(false)} className="rounded-lg px-4 py-2 text-sm text-neutral-200 hover:bg-white/10">Cancelar</button><button type="button" onClick={() => { setCompatibilityUrl(currentEmbedUrl); setShowCompatibilityPrompt(false); }} className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-black hover:bg-amber-500">Abrir este servidor</button></div>
-        </div>
-      </div>}
     </div>
   );
 }

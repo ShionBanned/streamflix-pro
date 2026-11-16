@@ -427,16 +427,71 @@ export const tmdbService = {
 
   async getSeasonDetails(tvId, seasonNumber, language = 'es-MX') {
     const data = await tmdbGet(`/tv/${tvId}/season/${seasonNumber}`, { language });
-    if (data?.episodes) {
-      return {
-        ...data,
-        episodes: data.episodes.map((ep) => ({
-          ...ep,
-          still_url: ep.still_path ? `https://image.tmdb.org/t/p/w300${ep.still_path}` : null,
-        })),
-      };
+    if (!data?.episodes) return data;
+
+    let episodes = data.episodes.map((ep) => ({
+      ...ep,
+      still_url: ep.still_path ? `https://image.tmdb.org/t/p/w300${ep.still_path}` : null,
+    }));
+
+    const missingOverview = () => episodes.some((ep) => !ep.overview || !ep.overview.trim());
+
+    // Motor adicional 1: respaldo TMDB es-ES y en-US si faltan sinopsis en es-MX
+    if (missingOverview()) {
+      const fallbacks = language === 'es-MX' ? ['es-ES', 'en-US'] : language !== 'en-US' ? ['en-US'] : [];
+      const resList = await Promise.allSettled(
+        fallbacks.map((fbLang) => tmdbGet(`/tv/${tvId}/season/${seasonNumber}`, { language: fbLang }))
+      );
+      for (const r of resList) {
+        if (r.status !== 'fulfilled' || !r.value?.episodes) continue;
+        const byNum = new Map(r.value.episodes.map((e) => [e.episode_number, e]));
+        episodes = episodes.map((ep) => {
+          const fb = byNum.get(ep.episode_number);
+          if (!fb) return ep;
+          return {
+            ...ep,
+            overview: ep.overview?.trim() ? ep.overview : fb.overview || '',
+            name: (!ep.name || /^Episodio\s+\d+$/i.test(ep.name)) && fb.name ? fb.name : ep.name,
+            runtime: ep.runtime || fb.runtime || null,
+          };
+        });
+      }
     }
-    return data;
+
+    // Motor adicional 2: respaldo TVMaze por IMDb ID si aún faltan sinopsis
+    if (missingOverview()) {
+      try {
+        const imdbId = await this.getImdbId('tv', tvId);
+        if (imdbId) {
+          const showRes = await axios.get(`https://api.tvmaze.com/lookup/shows?imdb=${encodeURIComponent(imdbId)}`, { timeout: 4000 });
+          const mazeId = showRes.data?.id;
+          if (mazeId) {
+            const epRes = await axios.get(`https://api.tvmaze.com/shows/${mazeId}/episodes`, { timeout: 4500 });
+            const mazeEps = Array.isArray(epRes.data) ? epRes.data : [];
+            const mazeMap = new Map(
+              mazeEps
+                .filter((m) => Number(m.season) === Number(seasonNumber))
+                .map((m) => [Number(m.number), m])
+            );
+            episodes = episodes.map((ep) => {
+              if (ep.overview?.trim()) return ep;
+              const m = mazeMap.get(Number(ep.episode_number));
+              if (!m?.summary) return ep;
+              const cleanSummary = String(m.summary).replace(/<[^>]+>/g, '').trim();
+              return {
+                ...ep,
+                overview: cleanSummary,
+                runtime: ep.runtime || m.runtime || null,
+              };
+            });
+          }
+        }
+      } catch {
+        // Ignorar si TVMaze no tiene el título o no responde
+      }
+    }
+
+    return { ...data, episodes };
   },
 
   async getAnime(page = 1, language = 'es-MX') {
@@ -566,6 +621,28 @@ export const tmdbService = {
         : null;
     } catch (err) {
       console.error(`[TMDB Trailer Error #${tmdbId}]:`, err.message);
+      return null;
+    }
+  },
+
+  async getCollection(collectionId, lang = 'es-MX') {
+    const id = Number(collectionId);
+    if (!Number.isInteger(id) || id < 1) return null;
+    try {
+      const data = await tmdbGet(`/collection/${id}`, { language: lang });
+      return {
+        id: data.id,
+        name: data.name,
+        overview: data.overview || '',
+        parts: Array.isArray(data.parts)
+          ? data.parts
+              .filter((p) => p && (p.backdrop_path || p.poster_path))
+              .sort((a, b) => (a.release_date || '9999').localeCompare(b.release_date || '9999'))
+              .map((p) => ({ ...p, media_type: 'movie', type: 'movie' }))
+          : [],
+      };
+    } catch (err) {
+      console.error(`[TMDB Collection Error #${collectionId}]:`, err.message);
       return null;
     }
   },

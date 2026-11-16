@@ -215,6 +215,16 @@ app.get('/api/tmdb/tv/:id/season/:seasonNumber', async (req, res) => {
   }
 });
 
+app.get('/api/tmdb/collection/:id', async (req, res) => {
+  try {
+    const { lang = 'es-MX' } = req.query;
+    const data = await tmdbService.getCollection(req.params.id, lang);
+    res.json(data || { id: req.params.id, name: '', parts: [] });
+  } catch (err) {
+    res.status(500).json({ error: 'Error obteniendo colección', message: err.message });
+  }
+});
+
 app.get('/api/catalog/anime', async (req, res) => {
   try {
     const { page = 1, lang = 'es-MX' } = req.query;
