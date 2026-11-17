@@ -4,6 +4,7 @@ import path from 'node:path';
 import http from 'node:http';
 import https from 'node:https';
 import axios from 'axios';
+import { IPTV_CACHE_FILE as DISK_CACHE_FILE } from '../config/paths.js';
 
 // Agentes HTTP/HTTPS con Keep-Alive para acelerar descargas M3U y proxy de segmentos HLS/TS
 const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 64, timeout: 10000 });
@@ -34,7 +35,7 @@ export const COUNTRY_NAMES = {
   'es-global': 'Internacional',
 };
 
-const DISK_CACHE_FILE = path.resolve(process.cwd(), '.local', 'iptv-channels-cache.json');
+// Ruta centralizada en DATA_DIR (paths.js)
 const CACHE_TTL = 20 * 60 * 1000; // 20 minutos de frescura en memoria
 const DISK_CACHE_MAX_AGE = 24 * 60 * 60 * 1000; // Hasta 24h válido para arranque instantáneo SWR
 const SOURCE_FETCH_TIMEOUT = 6500; // Reducido de 15s a 6.5s para que ninguna lista lenta bloquee

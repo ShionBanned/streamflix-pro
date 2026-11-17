@@ -5,19 +5,18 @@ import SubtitleOverlay from './SubtitleOverlay.jsx';
 import { shiftSubtitleCues } from '../../../shared/playerUtils.mjs';
 import AiSubtitleControl from './AiSubtitleControl.jsx';
 import ExternalAudio from './ExternalAudio.jsx';
-import { Settings2, Subtitles, Volume2, VolumeX, Play, Pause, Maximize, Minimize, X } from 'lucide-react';
+import { Settings2, Subtitles, Volume2, X } from 'lucide-react';
+import CinemaControls from './CinemaControls.jsx';
+import PlaybackFeedback from './PlaybackFeedback.jsx';
+import usePlaybackShortcuts from '../hooks/usePlaybackShortcuts.js';
 
-const formatTime = seconds => {
-  if (!Number.isFinite(seconds)) return '00:00';
-  const value = Math.max(0, Math.floor(seconds));
-  return `${String(Math.floor(value / 60)).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`;
-};
-
-export default function DirectPlayer({ url, initialTime = 0, onProgress, sourcePages = {} }) {
+export default function DirectPlayer({ url, initialTime = 0, onProgress, sourcePages = {}, shortcutsBlocked = false }) {
   const videoRef = useRef(null); const playerRef = useRef(null); const engineRef = useRef(null); const originals = useRef(new WeakMap()); const localRef = useRef(null);
   const progressRef = useRef(onProgress); progressRef.current = onProgress;
   const [message, setMessage] = useState('Conectando con la fuente directa…');
   const [showTools, setShowTools] = useState(false);
+  const [showHud, setShowHud] = useState(true);
+  const hudTimerRef = useRef(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -73,10 +72,19 @@ export default function DirectPlayer({ url, initialTime = 0, onProgress, sourceP
   useEffect(syncOffset, [offset, local]);
   useEffect(() => () => { if (localRef.current?.url?.startsWith('blob:')) URL.revokeObjectURL(localRef.current.url); }, []);
   useEffect(() => {
-    const update = () => setIsFullscreen(document.fullscreenElement === playerRef.current);
+    const update = () => setIsFullscreen(document.fullscreenElement === (playerRef.current?.closest('#smart-player-container') || playerRef.current));
     document.addEventListener('fullscreenchange', update);
     return () => document.removeEventListener('fullscreenchange', update);
   }, []);
+  useEffect(() => {
+    hudTimerRef.current = setTimeout(() => setShowHud(false), 3500);
+    return () => clearTimeout(hudTimerRef.current);
+  }, []);
+  const triggerHud = () => {
+    setShowHud(true);
+    clearTimeout(hudTimerRef.current);
+    hudTimerRef.current = setTimeout(() => setShowHud(false), 3500);
+  };
   const togglePlay = () => {
     const video = videoRef.current;
     if (!video) return;
@@ -85,8 +93,40 @@ export default function DirectPlayer({ url, initialTime = 0, onProgress, sourceP
   };
   const toggleFullscreen = () => {
     if (document.fullscreenElement) document.exitFullscreen?.();
-    else playerRef.current?.requestFullscreen?.();
+    else (playerRef.current?.closest('#smart-player-container') || playerRef.current)?.requestFullscreen?.();
   };
+  const seekTo = value => {
+    const video = videoRef.current;
+    if (!video || !Number.isFinite(video.duration) || video.duration <= 0) return;
+    video.currentTime = Math.max(0, Math.min(video.duration, value));
+    setCurrentTime(video.currentTime);
+  };
+  const changeVolume = value => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.volume = value;
+    video.muted = value === 0;
+  };
+  const toggleMute = () => {
+    const video = videoRef.current;
+    if (video) video.muted = !video.muted;
+  };
+  const shortcutFeedback = usePlaybackShortcuts({
+    blocked: showTools || shortcutsBlocked,
+    getState: () => ({
+      paused: videoRef.current?.paused,
+      currentTime: videoRef.current?.currentTime,
+      duration: videoRef.current?.duration,
+      volume: videoRef.current?.volume,
+      muted: videoRef.current?.muted,
+    }),
+    onPlayPause: togglePlay,
+    onSeek: seekTo,
+    onVolume: changeVolume,
+    onMute: toggleMute,
+    onFullscreen: toggleFullscreen,
+    onActivity: triggerHud,
+  });
   const importSub = async event => {
     const file = event.target.files?.[0]; event.target.value = ''; if (!file) return;
     try {
@@ -97,11 +137,17 @@ export default function DirectPlayer({ url, initialTime = 0, onProgress, sourceP
       localRef.current = sub; setLocal(sub); setSelectedSub('local');
     } catch (error) { setMessage(error.message); }
   };
-  return <div ref={playerRef} className="relative w-full h-full flex flex-col bg-black">
-    <video ref={videoRef} playsInline crossOrigin="anonymous" className="w-full min-h-0 flex-1 object-contain cursor-pointer" data-subtitle-offset={offset} onClick={togglePlay} onPlay={() => setIsPlaying(true)} onPause={() => setIsPlaying(false)} onVolumeChange={event => { setVolume(event.currentTarget.volume); setIsMuted(event.currentTarget.muted); }} onLoadedMetadata={event => setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)} onDurationChange={event => setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)} onTimeUpdate={event => {
+  return <div ref={playerRef} onMouseMove={triggerHud} onTouchStart={triggerHud} className="relative w-full h-full bg-black">
+    <PlaybackFeedback feedback={shortcutFeedback} />
+    <video ref={videoRef} playsInline crossOrigin="anonymous" className="h-full w-full object-contain cursor-pointer" data-subtitle-offset={offset} onClick={togglePlay} onPlay={() => setIsPlaying(true)} onPause={() => setIsPlaying(false)} onVolumeChange={event => { setVolume(event.currentTarget.volume); setIsMuted(event.currentTarget.muted); }} onLoadedMetadata={event => setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)} onDurationChange={event => setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)} onTimeUpdate={event => {
       const video = event.currentTarget; setCurrentTime(video.currentTime); if (Number.isFinite(video.duration)) progressRef.current?.({ currentTime: video.currentTime, duration: video.duration });
     }}>
     </video>
+    {message !== 'Reproduciendo fuente directa' && (
+      <div role="status" className="pointer-events-none absolute left-1/2 top-1/2 z-20 w-max max-w-[80%] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-white/15 bg-black/80 px-4 py-3 text-center text-xs font-semibold text-white backdrop-blur-xl">
+        {message}
+      </div>
+    )}
     {selectedSub === 'local' && localCues.length > 0 && (
       <SubtitleOverlay
         videoRef={videoRef}
@@ -113,19 +159,22 @@ export default function DirectPlayer({ url, initialTime = 0, onProgress, sourceP
         backdrop={localStorage.getItem('sf_sub_bg') === '1'}
       />
     )}
-    <div className="relative z-10 px-4 sm:px-6 py-2.5 space-y-2 bg-[#111]/95 border-t border-white/10 text-white">
-      <input type="range" aria-label="Posición del video" min="0" max={duration || 0} step="0.1" value={Math.min(currentTime, duration || 0)} disabled={!duration} onChange={event => { const video = videoRef.current; if (video) { video.currentTime = Number(event.target.value); setCurrentTime(video.currentTime); } }} className="w-full h-1 accent-[#E50914] disabled:opacity-40" />
-      <div className="flex items-center gap-2 sm:gap-3">
-        <button type="button" onClick={togglePlay} aria-label={isPlaying ? 'Pausar' : 'Reproducir'} className="p-1.5 rounded-full hover:bg-white/15">{isPlaying ? <Pause className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current" />}</button>
-        <span className="text-[11px] font-mono text-neutral-300 shrink-0">{formatTime(currentTime)} / {formatTime(duration)}</span>
-        <span role="status" className="hidden lg:flex min-w-0 flex-1 items-center gap-2 text-[11px] text-neutral-400"><span className={`w-2 h-2 rounded-full shrink-0 ${isPlaying ? 'bg-emerald-400' : 'bg-amber-400'}`} /><span className="truncate">{message}</span></span>
-        <div className="flex-1 lg:hidden" />
-        <button type="button" onClick={() => { const video = videoRef.current; if (video) video.muted = !video.muted; }} aria-label={isMuted ? 'Activar sonido' : 'Silenciar'} className="p-1.5 rounded-full hover:bg-white/15">{isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}</button>
-        <input type="range" aria-label="Volumen" min="0" max="1" step="0.05" value={isMuted ? 0 : volume} onChange={event => { const video = videoRef.current; if (video) { video.volume = Number(event.target.value); video.muted = video.volume === 0; } }} className="hidden sm:block w-16 h-1 accent-[#E50914]" />
-        <button type="button" onClick={() => setShowTools(value => !value)} aria-expanded={showTools} className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border transition ${showTools ? 'bg-white text-black border-white' : 'bg-white/10 text-white border-white/15 hover:bg-white/20'}`}><Settings2 className="w-4 h-4" /><span className="hidden sm:inline">Audio e idioma</span></button>
-        <button type="button" onClick={toggleFullscreen} aria-label={isFullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'} className="p-1.5 rounded-full hover:bg-white/15">{isFullscreen ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}</button>
-      </div>
-    </div>
+    <CinemaControls
+      visible={showHud || showTools}
+      playing={isPlaying}
+      currentTime={currentTime}
+      duration={duration}
+      volume={volume}
+      muted={isMuted}
+      fullscreen={isFullscreen}
+      onTogglePlay={togglePlay}
+      onSeek={seekTo}
+      onToggleMute={toggleMute}
+      onVolumeChange={changeVolume}
+      onToggleFullscreen={toggleFullscreen}
+    >
+      <button type="button" onClick={() => setShowTools(value => !value)} aria-expanded={showTools} className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-xs font-bold ${showTools ? 'border-white bg-white text-black' : 'border-white/20 bg-white/10 text-white hover:bg-white/20'}`}><Settings2 className="h-4 w-4" /><span className="hidden sm:inline">Audio e idioma</span></button>
+    </CinemaControls>
     <div className={`absolute right-3 sm:right-6 bottom-20 z-30 w-[410px] max-w-[calc(100vw-24px)] max-h-[65vh] overflow-y-auto rounded-xl border border-white/15 bg-[#171717]/98 shadow-[0_24px_80px_rgba(0,0,0,0.9)] backdrop-blur-2xl p-4 text-white space-y-4 animate-fadeIn ${showTools ? '' : 'hidden'}`}>
       <div className="flex items-center justify-between border-b border-white/10 pb-2"><h3 className="text-sm font-bold">Audio y subtítulos</h3><button type="button" onClick={() => setShowTools(false)} aria-label="Cerrar ajustes" className="p-1 text-neutral-400 hover:text-white"><X className="w-4 h-4" /></button></div>
       {audio.length > 1 ? <label className="flex items-center gap-2 text-xs text-neutral-300"><Volume2 className="w-4 h-4" /> Pista de audio <select className="ml-auto min-w-0 max-w-[58%] bg-neutral-800 border border-white/15 rounded-md px-2 py-1.5 text-white" onChange={event => {

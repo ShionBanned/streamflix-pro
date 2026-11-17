@@ -1,0 +1,81 @@
+{
+  "name": "streamflix",
+  "productName": "StreamFlix",
+  "version": "5.9.0",
+  "description": "StreamFlix Pro - Plataforma Personal de Streaming Híbrida para Windows",
+  "main": "electron/main.cjs",
+  "author": "Shion",
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "electron .",
+    "build:frontend": "npm run build --prefix frontend",
+    "test:backend": "npm test --prefix backend",
+    "test:frontend": "npm test --prefix frontend",
+    "test:updater": "node --test tests/updater.test.mjs tests/storage-sync-batch.test.mjs tests/migration-and-hydration.test.mjs tests/e2e-windows-update.test.mjs",
+    "test": "npm run test:backend && npm run test:frontend && npm run test:updater",
+    "lint": "node lint.mjs",
+    "typecheck": "npm run typecheck --prefix frontend",
+    "check": "npm run lint && npm run typecheck && npm test",
+    "build:electron": "npm run build:frontend && electron-builder --win --x64",
+    "pack:electron": "npm run build:frontend && electron-builder --dir"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.11"
+  },
+  "devDependencies": {
+    "axios": "^1.21.1",
+    "electron": "^34.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.shion.streamflix",
+    "productName": "StreamFlix",
+    "directories": {
+      "output": "dist-electron"
+    },
+    "artifactName": "${productName}-Setup-${version}.${ext}",
+    "files": [
+      "electron/**/*",
+      "backend/**/*",
+      "frontend/dist/**/*",
+      "shared/**/*",
+      "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}",
+      "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}",
+      "!backend/tests/**/*",
+      "!frontend/src/**/*",
+      "!frontend/tests/**/*",
+      "!tests/**/*",
+      "!**/.git*/**",
+      "!**/*.map",
+      "!**/.local/**",
+      "!**/.env*",
+      "!**/*.key",
+      "!**/artifacts/**"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "StreamFlix",
+      "uninstallDisplayName": "StreamFlix",
+      "deleteAppDataOnUninstall": false
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "ShionBanned",
+      "repo": "streamflix-releases"
+    }
+  }
+}

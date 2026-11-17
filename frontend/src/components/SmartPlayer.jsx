@@ -35,6 +35,7 @@ import {
 } from 'lucide-react';
 import { LANGUAGE_OPTIONS, AUDIO_ENGINE_PRESETS } from '../hooks/useUserMedia.js';
 import usePlayerControls, { formatPlayerTime } from '../hooks/usePlayerControls.js';
+import PlaybackFeedback from './PlaybackFeedback.jsx';
 import useStreamSource from '../hooks/useStreamSource.js';
 
 const DirectPlayer = React.lazy(() => import('./DirectPlayer.jsx'));
@@ -653,7 +654,7 @@ export default function SmartPlayer({
       cloudProgressConfirmedRef.current = true;
       trackedTimeRef.current = Math.floor(progress.currentTime);
       setCurrentTime(progress.currentTime); setCloudStatus('playing');
-      setCloudClock({ confirmed: true, time: progress.currentTime, status: progress.event || 'playing' });
+      setCloudClock({ confirmed: true, time: progress.currentTime, status: progress.event || 'playing', receivedAt: performance.now() });
       if (progress.duration) { trackedDurationRef.current = progress.duration; setDuration(progress.duration); }
     };
     window.addEventListener('message', onMessage);
@@ -851,7 +852,7 @@ export default function SmartPlayer({
     }
   };
 
-  const { toggleFullscreen, togglePlay, handleSeek, handleVolumeChange, toggleMute } = usePlayerControls({
+  const { toggleFullscreen, togglePlay, handleSeek, handleVolumeChange, toggleMute, shortcutFeedback } = usePlayerControls({
     videoRef, audioCtxRef, ensureWebAudioChain, triggerHudVisibility,
     setIsPlaying, setCurrentTime, setVolume, setIsMuted, setIsFullscreen,
     setTranscodeStart, trackedTimeRef, forceTranscode, duration, volume,
@@ -1213,16 +1214,6 @@ export default function SmartPlayer({
     setEmbedChoice({ url: '', mode: '' });
     setActiveServer(serverId); setActiveMirrorIdx(index);
   };
-  const playSiteVersion = (source, data, server) => {
-    if (!data?.servers || !server) return;
-    const playable = data.servers.filter(entry => !entry.pageOnly);
-    const index = playable.findIndex(entry => entry.url === server.url);
-    if (index < 0) return;
-    setSiteServers(current => ({ ...current, [source]: data.servers }));
-    setSitePageInputs(current => ({ ...current, [source]: data.pageUrl }));
-    setSiteTitlePages(current => ({ ...current, [source]: data.titleUrl }));
-    switchCloud(source, index);
-  };
   const selectSiteTitle = async (source, candidate) => {
     setSiteLoading(current => ({ ...current, [source]: true }));
     setSiteErrors(current => ({ ...current, [source]: '' }));
@@ -1361,6 +1352,7 @@ export default function SmartPlayer({
       ? 'Tráiler'
       : currentEmbedServerObj?.name || 'VidSrc (#1)';
   const selectedEmbedMode = embedChoice.url === currentEmbedUrl ? embedChoice.mode : '';
+  const embeddedCloudActive = Boolean(selectedEmbedMode && !['p2p', 'direct', 'trailer'].includes(activeServer));
   const playerBackdrop = item?.backdrop_url || (item?.backdrop_path ? `https://image.tmdb.org/t/p/w1280${item.backdrop_path}` : null) || item?.poster_url || (item?.poster_path ? `https://image.tmdb.org/t/p/w780${item.poster_path}` : null);
 
   return (
@@ -1381,6 +1373,8 @@ export default function SmartPlayer({
         className="absolute top-0 left-0 right-0 h-12 z-30 pointer-events-auto"
         style={{ background: 'transparent' }}
       />
+
+      {activeServer === 'p2p' && <PlaybackFeedback feedback={shortcutFeedback} />}
 
       {/* HUD SUPERIOR FLOTANTE ULTRA-LIMPIO */}
       <div
@@ -1784,15 +1778,14 @@ export default function SmartPlayer({
                   mediaType={mediaType}
                   season={currentSeason}
                   episode={currentEpisode}
-                  onPlaySiteServer={playSiteVersion}
                 />
               </div>
             ) : activeServer === 'direct' ? (
               <p className="text-xs text-neutral-300">En el reproductor directo, abre <strong>Audio y subtítulos</strong> en la barra inferior. Allí puedes elegir una pista incluida o cargar un audio externo.</p>
             ) : (
               <div className="space-y-3">
-                <p className="text-[11px] text-amber-200 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2">Conserva el video Cloud en 4K. Carga una pista de audio directa y silencia el audio inglés dentro del reproductor Cloud. {activeServer === 'vidsrc' && currentEmbedServerObj?.mirrors?.[activeMirrorIdx]?.id === 'sh' ? 'En VidSrc.sh también solicitamos el silencio automáticamente.' : 'Este servidor no permite silenciarlo desde StreamFlix.'}</p>
-                <ExternalAudio videoRef={null} videoKey={currentEmbedUrl} sourcePages={sitePageInputs} cloudClock={cloudClock} onActiveChange={setCloudAudioActive} title={item?.title || item?.name || ''} mediaType={mediaType} season={currentSeason} episode={currentEpisode} onPlaySiteServer={playSiteVersion} />
+                <p className="text-[11px] text-amber-200 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2">Conserva el video Cloud actual. Carga una pista de audio directa y silencia el audio original dentro del reproductor Cloud. {activeServer === 'vidsrc' && currentEmbedServerObj?.mirrors?.[activeMirrorIdx]?.id === 'sh' ? 'En VidSrc.sh también solicitamos el silencio automáticamente.' : 'Este servidor no permite silenciarlo desde StreamFlix.'}</p>
+                <ExternalAudio videoRef={null} videoKey={currentEmbedUrl} sourcePages={sitePageInputs} cloudClock={cloudClock} onActiveChange={setCloudAudioActive} title={item?.title || item?.name || ''} mediaType={mediaType} season={currentSeason} episode={currentEpisode} />
               </div>
             )}
           </div>
@@ -2252,7 +2245,7 @@ export default function SmartPlayer({
       {/* LIENZO DE VIDEO 100% PANTALLA COMPLETA */}
       <div className="relative w-full h-full bg-black flex items-center justify-center">
         {activeServer === 'direct' && directUrl ? (
-          <React.Suspense fallback={<p className="text-white text-sm">Preparando reproductor directo…</p>}><DirectPlayer url={directUrl} initialTime={resumeOffset} sourcePages={sitePageInputs} onProgress={progress => { cloudProgressConfirmedRef.current = true; trackedTimeRef.current = progress.currentTime; trackedDurationRef.current = progress.duration; }} /></React.Suspense>
+          <React.Suspense fallback={<p className="text-white text-sm">Preparando reproductor directo…</p>}><DirectPlayer url={directUrl} initialTime={resumeOffset} sourcePages={sitePageInputs} shortcutsBlocked={Boolean(activeDrawer)} onProgress={progress => { cloudProgressConfirmedRef.current = true; trackedTimeRef.current = progress.currentTime; trackedDurationRef.current = progress.duration; }} /></React.Suspense>
         ) : activeServer === 'trailer' && trailerFallbackKey ? (
           <iframe
             key={`trailer-${trailerFallbackKey}`}
@@ -2827,12 +2820,22 @@ export default function SmartPlayer({
             allowFullScreen
           />
         )}
-        {activeServer !== 'p2p' && activeServer !== 'direct' && activeServer !== 'trailer' && selectedEmbedMode && <div onMouseEnter={triggerHudVisibility} onClick={event => event.stopPropagation()} className={`absolute bottom-4 right-4 sm:bottom-6 sm:right-6 z-40 max-w-[calc(100vw-2rem)] flex flex-wrap justify-end gap-1.5 rounded-xl border border-white/10 bg-black/75 p-1.5 shadow-2xl backdrop-blur-xl transition-all duration-300 ${showHud || activeDrawer ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-3 pointer-events-none'}`}>
+        {embeddedCloudActive && !showHud && !activeDrawer && (
+          <div
+            aria-hidden="true"
+            onMouseMove={triggerHudVisibility}
+            onClick={triggerHudVisibility}
+            onTouchStart={triggerHudVisibility}
+            className="absolute inset-0 z-30 bg-transparent"
+          />
+        )}
+        {embeddedCloudActive && <div onMouseEnter={triggerHudVisibility} onClick={event => event.stopPropagation()} className={`absolute bottom-4 right-4 sm:bottom-6 sm:right-6 z-40 max-w-[calc(100vw-2rem)] flex flex-wrap justify-end gap-1.5 rounded-xl border border-white/10 bg-black/75 p-1.5 shadow-2xl backdrop-blur-xl transition-all duration-300 ${showHud || activeDrawer ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 invisible pointer-events-none'}`}>
               {selectedEmbedMode === 'isolated'
                 ? <button onClick={() => setEmbedChoice({ url: currentEmbedUrl, mode: 'compatible' })} className="px-2.5 py-1.5 rounded-lg hover:bg-amber-900/60 text-amber-200 text-xs font-semibold transition" title="Puede mostrar anuncios o abrir ventanas">Modo compatible</button>
                 : <button onClick={() => setEmbedChoice({ url: currentEmbedUrl, mode: 'isolated' })} className="px-2.5 py-1.5 rounded-lg hover:bg-white/15 text-white text-xs font-semibold transition">Aislar</button>}
               <button onClick={tryNextCloud} className="px-2.5 py-1.5 rounded-lg hover:bg-white/15 text-white text-xs font-semibold transition">Siguiente fuente</button>
               <button onClick={() => setActiveDrawer('servers')} className="px-2.5 py-1.5 rounded-lg bg-[#E50914] hover:bg-red-700 text-white text-xs font-semibold transition">Servidores</button>
+              <button onClick={toggleFullscreen} className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg hover:bg-white/15 text-white text-xs font-semibold transition" title="Pantalla completa con la interfaz StreamFlix"><Maximize className="w-3.5 h-3.5" /> Pantalla completa StreamFlix</button>
         </div>}
       </div>
     </div>

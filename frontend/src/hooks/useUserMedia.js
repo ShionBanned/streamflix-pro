@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { syncKeyToBackend } from '../services/storageSync.js';
 
 const CONTINUE_WATCHING_KEY = 'streamflix_continue_watching';
 const WATCHLIST_KEY = 'streamflix_watchlist';
@@ -306,6 +307,7 @@ export function useUserMedia() {
   useEffect(() => {
     try {
       localStorage.setItem(CONTINUE_WATCHING_KEY, JSON.stringify(continueWatching));
+      syncKeyToBackend(CONTINUE_WATCHING_KEY, continueWatching);
     } catch (e) {
       console.warn('Error guardando continueWatching:', e);
     }
@@ -314,6 +316,7 @@ export function useUserMedia() {
   useEffect(() => {
     try {
       localStorage.setItem(WATCHLIST_KEY, JSON.stringify(watchlist));
+      syncKeyToBackend(WATCHLIST_KEY, watchlist);
     } catch (e) {
       console.warn('Error guardando watchlist:', e);
     }
@@ -322,6 +325,7 @@ export function useUserMedia() {
   useEffect(() => {
     try {
       localStorage.setItem(TASTE_HISTORY_KEY, JSON.stringify(tasteHistory));
+      syncKeyToBackend(TASTE_HISTORY_KEY, tasteHistory);
     } catch (e) {
       console.warn('Error guardando tasteHistory:', e);
     }
@@ -330,6 +334,7 @@ export function useUserMedia() {
   useEffect(() => {
     try {
       localStorage.setItem(PREFERRED_LANGUAGE_KEY, preferredLanguage);
+      syncKeyToBackend(PREFERRED_LANGUAGE_KEY, preferredLanguage);
     } catch (e) {
       console.warn('Error guardando preferredLanguage:', e);
     }
@@ -338,10 +343,53 @@ export function useUserMedia() {
   useEffect(() => {
     try {
       localStorage.setItem(AUDIO_ENGINE_PRESET_KEY, audioEnginePreset);
+      syncKeyToBackend(AUDIO_ENGINE_PRESET_KEY, audioEnginePreset);
     } catch (e) {
       console.warn('Error guardando audioEnginePreset:', e);
     }
   }, [audioEnginePreset]);
+
+  // Actualizar estado visible de React cuando ocurre la hidratación desde el backend
+  useEffect(() => {
+    const onHydrated = (e) => {
+      const data = e?.detail || {};
+      if (data[CONTINUE_WATCHING_KEY]) {
+        try {
+          const parsed = typeof data[CONTINUE_WATCHING_KEY] === 'string' ? JSON.parse(data[CONTINUE_WATCHING_KEY]) : data[CONTINUE_WATCHING_KEY];
+          if (Array.isArray(parsed) && parsed.length > 0) setContinueWatching(parsed);
+        } catch {
+          // Ignorar fallo de parseo
+        }
+      }
+      if (data[WATCHLIST_KEY]) {
+        try {
+          const parsed = typeof data[WATCHLIST_KEY] === 'string' ? JSON.parse(data[WATCHLIST_KEY]) : data[WATCHLIST_KEY];
+          if (Array.isArray(parsed) && parsed.length > 0) setWatchlist(parsed);
+        } catch {
+          // Ignorar fallo de parseo
+        }
+      }
+      if (data[TASTE_HISTORY_KEY]) {
+        try {
+          const parsed = typeof data[TASTE_HISTORY_KEY] === 'string' ? JSON.parse(data[TASTE_HISTORY_KEY]) : data[TASTE_HISTORY_KEY];
+          if (Array.isArray(parsed) && parsed.length > 0) setTasteHistory(parsed);
+        } catch {
+          // Ignorar fallo de parseo
+        }
+      }
+      if (data[PREFERRED_LANGUAGE_KEY]) {
+        const val = typeof data[PREFERRED_LANGUAGE_KEY] === 'string' ? data[PREFERRED_LANGUAGE_KEY] : String(data[PREFERRED_LANGUAGE_KEY]);
+        if (val) setPreferredLanguage(val);
+      }
+      if (data[AUDIO_ENGINE_PRESET_KEY]) {
+        const val = typeof data[AUDIO_ENGINE_PRESET_KEY] === 'string' ? data[AUDIO_ENGINE_PRESET_KEY] : String(data[AUDIO_ENGINE_PRESET_KEY]);
+        if (val) setAudioEnginePreset(val);
+      }
+    };
+
+    window.addEventListener('streamflix:storage-hydrated', onHydrated);
+    return () => window.removeEventListener('streamflix:storage-hydrated', onHydrated);
+  }, []);
 
   const recordTasteInteraction = useCallback((item) => {
     if (!item || (!item.id && !item.tmdbId)) return;

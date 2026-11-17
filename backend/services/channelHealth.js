@@ -4,7 +4,7 @@ import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HOUR = 60 * 60 * 1000;
-const DEFAULT_FILE = fileURLToPath(new URL('../.local/iptv-health.json', import.meta.url));
+import { IPTV_HEALTH_FILE as DEFAULT_FILE } from '../config/paths.js';
 
 export class ChannelHealth {
   constructor({ file = DEFAULT_FILE, now = Date.now } = {}) {

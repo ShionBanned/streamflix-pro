@@ -18,8 +18,7 @@ async function getWebTorrent() {
   return WebTorrentLib;
 }
 
-const ROOT = path.resolve(process.cwd(), '.local', 'downloads');
-const INDEX = path.join(ROOT, 'index.json');
+import { DOWNLOADS_DIR as ROOT, DOWNLOADS_INDEX as INDEX } from '../config/paths.js';
 const MAX_FILE = 2 * 1024 ** 3;
 const MAX_INPUT = 4 * 1024 ** 3;
 const MAX_TOTAL = 8 * 1024 ** 3; // Ampliado a 8 GB para albergar temporadas enteras cómodamente
@@ -1098,4 +1097,31 @@ export function parseDownloadRange(header, size) {
   }
   end = Math.min(end, size - 1);
   return { start, end, partial: true };
+}
+
+export function getActiveDownloadsCount() {
+  let count = 0;
+  for (const job of jobs.values()) {
+    if (job.status === 'downloading' || job.status === 'encoding') {
+      count++;
+    }
+  }
+  return count;
+}
+
+export async function stopAllDownloads() {
+  for (const [id, job] of jobs.entries()) {
+    if (job.status === 'downloading' || job.status === 'encoding') {
+      try {
+        job.status = 'paused';
+        job.error = 'Descarga pausada por cierre o actualización de la aplicación.';
+        if (job.controller && typeof job.controller.abort === 'function') {
+          job.controller.abort();
+        }
+      } catch {
+        // Ignorar fallos de cancelación forzada durante cierre ordenado
+      }
+    }
+  }
+  await persist();
 }

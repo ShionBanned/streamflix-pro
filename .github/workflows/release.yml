@@ -1,0 +1,200 @@
+name: Release Stable Installer
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Etiqueta de versión semántica (obligatorio: vX.Y.Z)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build, Verify & Publish Windows Release
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Validate Release Tag, Verify Git Ref & Checkout Tag Commit
+        id: check_version
+        shell: pwsh
+        run: |
+          $gitTag = "${{ github.ref_name }}"
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $gitTag = "${{ inputs.tag_name }}".Trim()
+          }
+
+          # 1. Validar formato semántico estricto vX.Y.Z
+          if (-not ($gitTag -match '^v[0-9]+\.[0-9]+\.[0-9]+$')) {
+            Write-Error "Fallo crítico: No se permite publicar directamente desde main ni ramas sin un tag de versión válido (formato vX.Y.Z). Recibido: '$gitTag'"
+            exit 1
+          }
+
+          # 2. Exigir explícitamente el secret RELEASES_PAT para el repositorio separado
+          if ([string]::IsNullOrWhiteSpace("${{ secrets.RELEASES_PAT }}")) {
+            Write-Error "Fallo de configuración: Se exige el secret RELEASES_PAT para publicar en el repositorio de distribución separado (streamflix-releases)."
+            exit 1
+          }
+
+          # 3. Asegurar que las etiquetas remotas estén actualizadas y comprobar que el tag existe
+          git fetch --tags --force
+          $tagCommit = git rev-parse -q --verify "refs/tags/$gitTag"
+          if (-not $tagCommit) {
+            Write-Error "Fallo crítico: El tag '$gitTag' no existe en el repositorio Git."
+            exit 1
+          }
+
+          # 4. Compilar exactamente el commit de ese tag (evita compilar main en workflow_dispatch)
+          Write-Host "Verificando y cambiando el working tree al commit del tag $gitTag ($tagCommit)..."
+          git checkout $gitTag
+
+          # 5. Comprobar concordancia estricta entre el tag y las versiones de package.json en ese commit
+          $pkgVersion = (Get-Content package.json | ConvertFrom-Json).version
+          $backendVersion = (Get-Content backend/package.json | ConvertFrom-Json).version
+          $frontendVersion = (Get-Content frontend/package.json | ConvertFrom-Json).version
+          
+          if ($pkgVersion -ne $backendVersion -or $pkgVersion -ne $frontendVersion) {
+            Write-Error "Inconsistencia de versiones en el commit de $gitTag: root ($pkgVersion), backend ($backendVersion), frontend ($frontendVersion)"
+            exit 1
+          }
+
+          $expectedTag = "v$pkgVersion"
+          if ($gitTag -ne $expectedTag) {
+            Write-Error "Fallo de validación: El tag especificado ($gitTag) no coincide con la versión declarada en package.json ($expectedTag)"
+            exit 1
+          }
+
+          Write-Host "✅ Validación exitosa: Tag $gitTag verificado en commit $tagCommit coincidiendo con versión $pkgVersion en todo el proyecto."
+          echo "RELEASE_TAG=$gitTag" >> $env:GITHUB_OUTPUT
+          echo "VERSION=$pkgVersion" >> $env:GITHUB_OUTPUT
+
+      - name: Install Project Dependencies
+        run: |
+          npm install
+          npm ci --prefix backend || npm install --prefix backend
+          npm ci --prefix frontend || npm install --prefix frontend
+
+      - name: Run Complete Quality Gate (Lint, Types, Backend, Frontend & Updater Tests)
+        run: npm run check
+
+      - name: Compile Frontend Bundle (Vite)
+        run: npm run build:frontend
+
+      - name: Build Windows Installer & Update Metadata (Pre-Release Phase)
+        id: build_electron
+        shell: pwsh
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        run: |
+          # Compilar localmente sin publicar para inspeccionar artefactos primero
+          npx electron-builder --win --x64 --publish never
+
+      - name: Verify Artifacts Integrity Before Making Release Public
+        id: verify_artifacts
+        shell: pwsh
+        run: |
+          $distDir = "dist-electron"
+          if (-not (Test-Path $distDir)) {
+            Write-Error "Fallo crítico: No se generó el directorio de compilación $distDir"
+            exit 1
+          }
+
+          $version = "${{ steps.check_version.outputs.VERSION }}"
+          $exePath = Join-Path $distDir "StreamFlix-Setup-$version.exe"
+          $ymlPath = Join-Path $distDir "latest.yml"
+          $blockmapPath = Join-Path $distDir "StreamFlix-Setup-$version.exe.blockmap"
+
+          # Comprobar presencia de los 3 artefactos obligatorios
+          if (-not (Test-Path $exePath)) {
+            Write-Error "Fallo crítico: No se encontró el instalador obligatorio en $exePath"
+            exit 1
+          }
+          if (-not (Test-Path $ymlPath)) {
+            Write-Error "Fallo crítico: No se encontró el archivo de metadatos obligatorio en $ymlPath"
+            exit 1
+          }
+          if (-not (Test-Path $blockmapPath)) {
+            Write-Error "Fallo crítico: No se encontró el archivo blockmap obligatorio en $blockmapPath"
+            exit 1
+          }
+
+          $exe = Get-Item $exePath
+          $yml = Get-Item $ymlPath
+          $blockmap = Get-Item $blockmapPath
+
+          if ($exe.Length -lt 10000000) {
+            Write-Error "El instalador generado ($($exe.Name)) es sospechosamente pequeño ($($exe.Length) bytes)."
+            exit 1
+          }
+          if ($yml.Length -lt 50) {
+            Write-Error "El archivo latest.yml es sospechosamente pequeño ($($yml.Length) bytes)."
+            exit 1
+          }
+          if ($blockmap.Length -lt 500) {
+            Write-Error "El archivo blockmap es sospechosamente pequeño ($($blockmap.Length) bytes)."
+            exit 1
+          }
+
+          # Comprobación de integridad cruzada con latest.yml
+          $ymlContent = Get-Content $yml.FullName -Raw
+          if (-not ($ymlContent -match "StreamFlix-Setup-$version\.exe")) {
+            Write-Error "latest.yml no contiene referencia al instalador de la versión $version"
+            exit 1
+          }
+
+          Write-Host "✅ Artefactos verificados con éxito antes de publicar:"
+          Write-Host "  - Instalador (.exe): $($exe.Name) ($([math]::Round($exe.Length / 1MB, 2)) MB)"
+          Write-Host "  - Metadatos (latest.yml): $($yml.Name) ($($yml.Length) bytes)"
+          Write-Host "  - Bloques diferenciales (.blockmap): $($blockmap.Name) ($($blockmap.Length) bytes)"
+
+      - name: Publish Stable Release to Public Repository
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_PAT }}
+          RELEASE_TAG: ${{ steps.check_version.outputs.RELEASE_TAG }}
+          DIST_REPO: ShionBanned/streamflix-releases
+        run: |
+          $distDir = "dist-electron"
+          $version = "${{ steps.check_version.outputs.VERSION }}"
+          $exePath = (Resolve-Path (Join-Path $distDir "StreamFlix-Setup-$version.exe")).Path
+          $ymlPath = (Resolve-Path (Join-Path $distDir "latest.yml")).Path
+          $blockmapPath = (Resolve-Path (Join-Path $distDir "StreamFlix-Setup-$version.exe.blockmap")).Path
+
+          # Colección explícita de los 3 artefactos obligatorios
+          $files = @($exePath, $ymlPath, $blockmapPath) | Where-Object { Test-Path $_ }
+          
+          # Falla inmediata si la lista está vacía o incompleta
+          if (-not $files -or $files.Count -eq 0) {
+            Write-Error "Fallo crítico: La lista de assets para publicar está vacía."
+            exit 1
+          }
+          if ($files.Count -ne 3) {
+            Write-Error "Fallo crítico: Se esperaban 3 assets obligatorios (.exe, latest.yml, .blockmap), pero se encontraron $($files.Count)."
+            exit 1
+          }
+
+          Write-Host "Publicando Release estable $env:RELEASE_TAG en $env:DIST_REPO con los siguientes assets:"
+          $files | ForEach-Object { Write-Host "  - $_" }
+          
+          # Crear la release pública como publicada (no borrador, no prerelease)
+          gh release create "$env:RELEASE_TAG" $files `
+            --repo "$env:DIST_REPO" `
+            --title "StreamFlix Pro $env:RELEASE_TAG" `
+            --notes "Versión de producción $env:RELEASE_TAG para Windows con instalador por usuario y actualizaciones automáticas integradas."

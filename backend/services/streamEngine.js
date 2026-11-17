@@ -203,48 +203,6 @@ class StreamEngine {
    * Sirve el stream P2P priorizando HTTP 206 Partial Content nativo para máxima velocidad de arranque,
    * y activando el Transcodificador / Remuxer FFmpeg AAC 2.0 cuando `transcode=1` o `.avi`.
    */
-  prioritizeStreamingWindow(torrent, file, byteStart = 0) {
-    try {
-      if (!torrent || !file || typeof file._startPiece !== 'number') return;
-      const pieceLength = torrent.pieceLength;
-      if (!pieceLength || pieceLength <= 0) return;
-
-      const fileStartPiece = file._startPiece;
-      const fileEndPiece = file._endPiece;
-
-      // 1. Prioridad Crítica en Cabecera (Head) y Cola (Tail / moov atom para MP4 y Cues para MKV)
-      // Asegura arranque instantáneo en menos de 2 segundos sin esperar a leer todo el archivo
-      if (typeof torrent.critical === 'function') {
-        const headEnd = Math.min(fileEndPiece, fileStartPiece + 4);
-        torrent.critical(fileStartPiece, headEnd);
-
-        const tailStart = Math.max(fileStartPiece, fileEndPiece - 4);
-        torrent.critical(tailStart, fileEndPiece);
-      }
-
-      // 2. Ventana de Anticipación (Lookahead Buffer):
-      // Mantiene un colchón de ~50 MB por delante del cursor de reproducción actual
-      const currentPiece = fileStartPiece + Math.floor(byteStart / pieceLength);
-      const lookaheadBytes = 50 * 1024 * 1024;
-      const lookaheadPieces = Math.max(12, Math.ceil(lookaheadBytes / pieceLength));
-      const endLookahead = Math.min(fileEndPiece, currentPiece + lookaheadPieces);
-
-      if (currentPiece <= endLookahead) {
-        // Los 4 pieces inmediatos se marcan como críticos (descarga prioritaria inmediata)
-        if (typeof torrent.critical === 'function') {
-          const immediateEnd = Math.min(endLookahead, currentPiece + 4);
-          torrent.critical(currentPiece, immediateEnd);
-        }
-        // El resto de la ventana de anticipación se selecciona con alta prioridad
-        if (typeof torrent.select === 'function') {
-          torrent.select(currentPiece, endLookahead, 1);
-        }
-      }
-    } catch {
-      // Ignorar fallos de priorización silenciosamente
-    }
-  }
-
   async streamTorrent(infoHash, req, res) {
     try {
       const {
@@ -268,8 +226,7 @@ class StreamEngine {
       }
 
       this.lastAccessMap.set(infoHash.toLowerCase(), Date.now());
-      file.select();
-      this.prioritizeStreamingWindow(torrent, file, 0);
+      // createReadStream selects the requested pieces and releases that selection on close.
 
       const ext = path.extname(file.name).toLowerCase();
       const lowerName = file.name.toLowerCase();
@@ -337,12 +294,6 @@ class StreamEngine {
         const track = selectAudioTrack(audioTracks, { ...req.query, manualAudio: req.query.manualAudio === '1' });
         const startTime = Math.max(0, Math.min(Number(req.query.startTime) || 0, Math.max(0, (info?.duration || 86400) - 0.1)));
 
-        // Si hay salto de tiempo, priorizar la ventana de streaming en WebTorrent
-        if (startTime > 0 && info?.duration && info.duration > 0 && file.length > 0) {
-          const estimatedByte = Math.floor((startTime / info.duration) * file.length);
-          this.prioritizeStreamingWindow(torrent, file, estimatedByte);
-        }
-
         const mustTranscodeVideo =
           isHevcOrAvi ||
           (info?.videoCodec ? ['hevc', 'av1', 'mpeg4', 'mpeg2video'].includes(info.videoCodec) : false);
@@ -388,7 +339,6 @@ class StreamEngine {
         res.writeHead(416, { 'Content-Range': 'bytes */' + totalSize, 'Access-Control-Allow-Origin': '*' }); return res.end();
       }
       const { start, end, length: chunkSize } = parsedRange;
-      this.prioritizeStreamingWindow(torrent, file, start);
 
       res.writeHead(206, {
         'Content-Range': `bytes ${start}-${end}/${totalSize}`,
@@ -472,6 +422,24 @@ class StreamEngine {
         this.destroyTorrent(hash, true);
       }
     }
+  }
+
+  hasActivePlayback() {
+    return Boolean(this.activeStreamingHash);
+  }
+
+  async closeAllStreams() {
+    if (this.client?.torrents) {
+      for (const t of [...this.client.torrents]) {
+        try {
+          t.destroy({ destroyStore: true }, () => {});
+        } catch {
+          // Ignorar errores de cierre forzado de torrents
+        }
+      }
+    }
+    this.torrentsMap.clear();
+    this.activeStreamingHash = null;
   }
 }
 

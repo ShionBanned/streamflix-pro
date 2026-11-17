@@ -24,17 +24,26 @@ import {
   downloadFile,
   parseDownloadRange,
   OFFLINE_PROFILES,
+  getActiveDownloadsCount,
+  stopAllDownloads,
 } from './services/downloadService.js';
 import { aiAvailable, getAiJob, getAiVtt, publicAiJob, receiveUpload, startP2pJob, startUploadJob } from './services/aiSubtitles.js';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { initDataDirectories } from './config/paths.js';
+import { getUserStorage, saveUserStorage } from './services/userStorage.js';
+import { VERSION, APP_TITLE } from '../shared/version.mjs';
 
 dotenv.config();
+initDataDirectories();
 
 const app = express();
 const PORT = process.env.PORT || 4000;
+const isAllowedOrigin = (origin) => !origin || new RegExp(`^http:\\/\\/(?:localhost|127\\.0\\.0\\.1):(?:${PORT}|4000|5173)$`).test(origin);
 
 app.use(
   cors({
-    origin: (origin, callback) => callback(null, !origin || /^http:\/\/(?:localhost|127\.0\.0\.1):(?:4000|5173)$/.test(origin)),
+    origin: (origin, callback) => callback(null, isAllowedOrigin(origin)),
     methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Range', 'Authorization'],
     exposedHeaders: ['Content-Range', 'Accept-Ranges', 'Content-Length', 'Content-Type'],
@@ -48,7 +57,7 @@ await initDownloads();
 void iptvService.prewarmChannels();
 
 const localMutation = (req, res, next) => {
-  if (req.headers.origin && !/^http:\/\/(?:localhost|127\.0\.0\.1):(?:4000|5173)$/.test(req.headers.origin)) return res.status(403).json({ error: 'Origen no permitido.' });
+  if (req.headers.origin && !isAllowedOrigin(req.headers.origin)) return res.status(403).json({ error: 'Origen no permitido.' });
   next();
 };
 app.get('/api/downloads', (_req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json({ items: listDownloads(), profiles: OFFLINE_PROFILES }); });
@@ -607,15 +616,59 @@ app.get('/api/iptv/proxy', async (req, res) => {
   await iptvService.proxyStream(url, req, res);
 });
 
-app.get('/api/health', (req, res) => {
+// Sincronización persistente de preferencias del usuario fuera del directorio de instalación
+app.get('/api/user/storage', (_req, res) => {
+  res.json(getUserStorage());
+});
+
+app.post('/api/user/storage', localMutation, (req, res) => {
+  res.json(saveUserStorage(req.body || {}));
+});
+
+// Estado de actividad del sistema para actualizaciones ordenadas
+app.get('/api/system/activity', (_req, res) => {
+  const activeDownloads = getActiveDownloadsCount();
+  const hasPlayback = streamEngine.hasActivePlayback();
+  res.json({
+    hasActiveDownloads: activeDownloads > 0,
+    activeDownloadsCount: activeDownloads,
+    hasActivePlayback: hasPlayback,
+    canShutdownSafely: activeDownloads === 0 && !hasPlayback,
+  });
+});
+
+app.post('/api/system/shutdown', localMutation, async (_req, res) => {
+  res.json({ status: 'shutting_down' });
+  try {
+    await stopAllDownloads();
+    await streamEngine.closeAllStreams();
+  } catch (err) {
+    console.warn('[Shutdown Error]:', err.message);
+  }
+  setTimeout(() => {
+    process.exit(0);
+  }, 400);
+});
+
+app.get('/api/health', (_req, res) => {
   res.json({
     status: 'online',
-    version: '5.4.0',
+    version: VERSION,
     capabilities: { ffmpeg: streamEngine.getStatus('').hasFfmpeg, cloudDiagnostics: true, aiSubtitles: aiAvailable() },
-    platform: 'StreamFlix Pro v5.4 — Netflix Ultra Edition ($0 Cost)',
+    platform: `${APP_TITLE} v${VERSION} — Netflix Ultra Edition ($0 Cost)`,
     timestamp: new Date().toISOString(),
   });
 });
+
+// Servir frontend compilado en producción (Vite build)
+const staticDir = process.env.STREAMFLIX_STATIC_DIR || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../frontend/dist');
+if (fs.existsSync(staticDir)) {
+  app.use(express.static(staticDir, { maxAge: '1h' }));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api/')) return next();
+    res.sendFile(path.join(staticDir, 'index.html'));
+  });
+}
 
 process.on('uncaughtException', (err) => {
   if (err.code === 'PREMATURE_CLOSE' || err.code === 'ERR_STREAM_PREMATURE_CLOSE') return;
@@ -628,7 +681,7 @@ process.on('unhandledRejection', (reason) => {
 
 app.listen(PORT, '127.0.0.1', () => {
   console.log(`=======================================================`);
-  console.log(`🚀 StreamFlix Pro v5.4 activo en: http://localhost:${PORT}`);
-  console.log(`🎬 Compresión Per-Title Offline, Live TV SWR y conversión de audio listos`);
+  console.log(`🚀 ${APP_TITLE} v${VERSION} activo en: http://localhost:${PORT}`);
+  console.log(`🎬 Compresión Per-Title Offline, Live TV SWR y producción listos`);
   console.log(`=======================================================`);
 });

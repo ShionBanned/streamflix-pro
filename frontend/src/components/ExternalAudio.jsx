@@ -5,7 +5,7 @@ const directMedia = url => {
   catch { return false; }
 };
 
-export default function ExternalAudio({ videoRef, videoKey, sourcePages = {}, cloudClock = null, onActiveChange, onPlaySiteServer, title = '', mediaType = 'movie', season = 1, episode = 1 }) {
+export default function ExternalAudio({ videoRef, videoKey, sourcePages = {}, cloudClock = null, onActiveChange, title = '', mediaType = 'movie', season = 1, episode = 1 }) {
   const audioRef = useRef(null);
   const objectUrlRef = useRef(null);
   const searchAbortRef = useRef(null);
@@ -18,7 +18,6 @@ export default function ExternalAudio({ videoRef, videoKey, sourcePages = {}, cl
   const [searchQuery, setSearchQuery] = useState(title);
   const [candidates, setCandidates] = useState([]);
   const [tracks, setTracks] = useState([]);
-  const [siteResult, setSiteResult] = useState(null);
   const [searching, setSearching] = useState(false);
   const [searchMessage, setSearchMessage] = useState('');
   const [resolvedPage, setResolvedPage] = useState('');
@@ -34,21 +33,21 @@ export default function ExternalAudio({ videoRef, videoKey, sourcePages = {}, cl
     const sync = () => {
       const target = video.currentTime - offset;
       audio.playbackRate = video.playbackRate;
-      if (target < 0 || video.paused || video.ended) { audio.pause(); return; }
-      if (audio.readyState >= 1 && Math.abs(audio.currentTime - target) > 0.25) {
+      if (target < 0 || video.paused || video.ended || video.seeking || video.readyState < 2) { audio.pause(); return; }
+      if (audio.readyState >= 1 && Math.abs(audio.currentTime - target) > 0.15) {
         try { audio.currentTime = Math.max(0, target); } catch { /* Esperar a los metadatos */ }
       }
       if (audio.paused && audio.readyState >= 2) audio.play().catch(() => {});
     };
-    for (const event of ['play', 'pause', 'timeupdate', 'seeking', 'seeked', 'ratechange', 'ended']) video.addEventListener(event, sync);
+    for (const event of ['play', 'playing', 'pause', 'timeupdate', 'seeking', 'seeked', 'waiting', 'canplay', 'ratechange', 'ended']) video.addEventListener(event, sync);
     const keepOriginalMuted = () => { if (!video.muted) video.muted = true; };
     video.addEventListener('volumechange', keepOriginalMuted);
     audio.addEventListener('canplay', sync);
-    const timer = window.setInterval(sync, 250);
+    const timer = window.setInterval(sync, 100);
     sync();
     return () => {
       window.clearInterval(timer);
-      for (const event of ['play', 'pause', 'timeupdate', 'seeking', 'seeked', 'ratechange', 'ended']) video.removeEventListener(event, sync);
+      for (const event of ['play', 'playing', 'pause', 'timeupdate', 'seeking', 'seeked', 'waiting', 'canplay', 'ratechange', 'ended']) video.removeEventListener(event, sync);
       video.removeEventListener('volumechange', keepOriginalMuted);
       audio.removeEventListener('canplay', sync);
       audio.pause(); video.muted = previousMuteRef.current;
@@ -60,17 +59,20 @@ export default function ExternalAudio({ videoRef, videoKey, sourcePages = {}, cl
     if (!audio) return;
     const sync = () => {
       if (!cloudClock.confirmed) return;
-      const target = cloudClock.time - offset;
+      const running = !['paused', 'completed', 'ended'].includes(cloudClock.status);
+      const elapsed = running && cloudClock.receivedAt ? Math.max(0, (performance.now() - cloudClock.receivedAt) / 1000) : 0;
+      const target = cloudClock.time + elapsed - offset;
       if (target < 0 || ['paused', 'completed'].includes(cloudClock.status)) { audio.pause(); return; }
-      if (audio.readyState >= 1 && Math.abs(audio.currentTime - target) > 0.45) {
+      if (audio.readyState >= 1 && Math.abs(audio.currentTime - target) > 0.2) {
         try { audio.currentTime = Math.max(0, target); } catch { /* Esperar metadatos */ }
       }
       if (audio.paused && audio.readyState >= 2) audio.play().catch(() => {});
     };
     audio.addEventListener('canplay', sync);
+    const timer = window.setInterval(sync, 100);
     sync();
-    return () => audio.removeEventListener('canplay', sync);
-  }, [cloudClock?.confirmed, cloudClock?.time, cloudClock?.status, fileName, offset]);
+    return () => { window.clearInterval(timer); audio.removeEventListener('canplay', sync); };
+  }, [cloudClock?.confirmed, cloudClock?.time, cloudClock?.status, cloudClock?.receivedAt, fileName, offset]);
   useEffect(() => {
     onActiveChange?.(Boolean(fileName));
     return () => onActiveChange?.(false);
@@ -139,14 +141,13 @@ export default function ExternalAudio({ videoRef, videoKey, sourcePages = {}, cl
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'No se pudo abrir el título.');
       setResolvedPage(data.pageUrl || '');
-      const found = (data.servers || []).filter(server => !server.pageOnly);
-      setSiteResult(data);
+      const found = (data.servers || []).filter(server => !server.pageOnly && directMedia(server.url));
       setTracks(found);
       if (found.length) {
         setCandidates([]);
-        setSearchMessage('Elige una pista directa para sincronizar o abre una versión del video con el idioma indicado.');
+        setSearchMessage('Elige una pista directa. El video actual seguirá reproduciéndose.');
       } else {
-        setSearchMessage('Se encontró el título, pero no publicó pistas ni reproductores compatibles.');
+        setSearchMessage('Se encontró el título, pero esta página solo ofrece reproductores completos: no expone una pista de audio independiente. El video actual no se cambiará. Puedes cargar un archivo o pegar una URL directa.');
       }
     } catch (cause) {
       if (cause.name === 'AbortError') return;
@@ -199,7 +200,7 @@ export default function ExternalAudio({ videoRef, videoKey, sourcePages = {}, cl
       <select aria-label="Procedencia del enlace de audio" value={sourceSite} onChange={event => { const site = event.target.value; setSourceSite(site); setCandidates([]); setTracks([]); setResolvedPage(''); setSearchMessage(''); if (site !== 'other') searchAudio(site); }} className="min-w-0 w-full rounded bg-neutral-800 border border-white/10 px-2 py-1.5 text-white"><option value="other">Otra fuente</option><option value="cuevana">Cuevana</option><option value="animeav1">AnimeAV1</option><option value="pelisplus">PelisPlus</option><option value="animeflv">AnimeFLV</option></select>
       {sourceSite !== 'other' && <div className="col-span-2 flex gap-2"><input type="search" aria-label="Buscar título para audio" value={searchQuery} onChange={event => setSearchQuery(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') searchAudio(); }} className="min-w-0 flex-1 rounded bg-neutral-800 border border-white/10 px-2 py-1.5 text-white" /><button type="button" onClick={() => searchAudio()} disabled={searching || searchQuery.trim().length < 2} className="rounded bg-[#E50914] px-3 py-1.5 font-semibold disabled:opacity-50">{searching ? 'Buscando…' : 'Buscar audio'}</button></div>}
       {sourceSite !== 'other' && candidates.length > 0 && <div className="col-span-2 max-h-32 overflow-y-auto space-y-1">{candidates.map(candidate => <button key={candidate.titleUrl} type="button" onClick={() => resolveCandidate(candidate)} className="block w-full rounded bg-neutral-800 px-2 py-1.5 text-left">{candidate.title}{candidate.year ? ` · ${candidate.year}` : ''}</button>)}</div>}
-      {sourceSite !== 'other' && tracks.length > 0 && <div className="col-span-2 max-h-40 overflow-y-auto space-y-1">{tracks.map(track => <button key={track.url} type="button" onClick={() => { if (directMedia(track.url)) activateUrl(track.url, `${track.name} · ${track.audioLabel}`); else { clear(); onPlaySiteServer?.(sourceSite, siteResult, track); } }} className="block w-full rounded bg-neutral-800 px-2 py-1.5 text-left"><span className="block font-semibold">{directMedia(track.url) ? 'Usar audio' : 'Ver versión'} · {track.name}</span><span className="text-neutral-400">{track.audioLabel}</span></button>)}</div>}
+      {sourceSite !== 'other' && tracks.length > 0 && <div className="col-span-2 max-h-40 overflow-y-auto space-y-1">{tracks.map(track => <button key={track.url} type="button" onClick={() => activateUrl(track.url, `${track.name} · ${track.audioLabel}`)} className="block w-full rounded bg-neutral-800 px-2 py-1.5 text-left"><span className="block font-semibold">Usar audio · {track.name}</span><span className="text-neutral-400">{track.audioLabel}</span></button>)}</div>}
       {sourceSite !== 'other' && searchMessage && <p role="status" className="col-span-2 text-[11px] text-neutral-300">{searchMessage}</p>}
       <input type="url" aria-label="URL directa de audio" value={urlInput} onChange={event => setUrlInput(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') applyAudioUrl(); }} placeholder="URL de audio (.mp3, .m4a…)" className="col-span-2 w-full min-w-0 rounded bg-neutral-800 border border-white/10 px-2 py-1.5 text-white" />
       <button type="button" onClick={applyAudioUrl} disabled={!urlInput.trim()} className="col-span-2 rounded bg-neutral-700 px-2 py-1.5 text-left font-semibold disabled:opacity-50">Usar URL de audio</button>
@@ -207,7 +208,7 @@ export default function ExternalAudio({ videoRef, videoKey, sourcePages = {}, cl
     <p className="text-[11px] text-neutral-400">Busca una pista directa por título, carga un archivo o pega una URL de audio. Las páginas de reproductor no contienen necesariamente una pista de audio independiente.</p>
     {error && <p role="alert" className="text-amber-300">{error}</p>}
     {fileName && <div className="flex flex-wrap gap-2 items-center"><span className="max-w-36 truncate" title={fileName}>{fileName}</span>{cloudClock && <button type="button" onClick={startCloudAudio} className="rounded bg-[#E50914] px-2 py-1 font-semibold">▶ Iniciar audio</button>}<label>Desfase (s) <input className="w-16 rounded bg-neutral-800 p-1" type="number" min="-120" max="120" step="0.1" value={offset} onChange={event => { const n = Number(event.target.value); if (Number.isFinite(n) && Math.abs(n) <= 120) changeOffset(n); }} /></label><button onClick={() => changeOffset(offset - 0.1)} className="rounded bg-neutral-800 px-2 py-1">−0.1 s</button><button onClick={() => changeOffset(offset + 0.1)} className="rounded bg-neutral-800 px-2 py-1">+0.1 s</button><button onClick={clear} className="rounded bg-neutral-700 px-2 py-1">Quitar audio</button></div>}
-    {fileName && cloudClock && <p className="text-[11px] text-neutral-400">{cloudClock.confirmed ? 'Sincronización automática por los eventos del servidor.' : 'Este servidor no comunica su posición. Inicia el audio al mismo tiempo que el video y ajusta el desfase; silencia el audio original en el reproductor Cloud.'}</p>}
+    {fileName && cloudClock && <p className="text-[11px] text-neutral-400">{cloudClock.confirmed ? 'Sincronización automática mientras el servidor comunique su posición, también después de saltar en el video.' : 'Este servidor no comunica su posición. Inicia el audio al mismo tiempo que el video y ajusta el desfase; después de cada salto tendrás que resincronizarlo manualmente. Silencia el audio original en el reproductor Cloud.'}</p>}
     <audio ref={audioRef} controls={Boolean(fileName)} onError={() => { if (fileName) setError('La pista no se pudo reproducir. Comprueba su formato y disponibilidad.'); }} className={fileName ? 'h-8 w-full' : 'hidden'} />
   </div>;
 }

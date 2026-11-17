@@ -11,6 +11,8 @@ import ProfilePage from './components/ProfilePage.jsx';
 import PlayerErrorBoundary from './components/PlayerErrorBoundary.jsx';
 import DiscoveryRows, { buildGenreRows } from './components/DiscoveryRows.jsx';
 import useUserMedia, { computePersonalizedPool } from './hooks/useUserMedia.js';
+import UpdateNotifier from './components/UpdateNotifier.jsx';
+import { initStorageSync, syncKeyToBackend } from './services/storageSync.js';
 import { MOVIE_GENRES, SERIES_GENRES, ANIME_GENRES, SORT_OPTIONS, TV_NETWORKS } from './utils/catalogOptions.js';
 
 const SmartPlayer = React.lazy(() => import('./components/SmartPlayer.jsx'));
@@ -49,16 +51,41 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('home');
   const [isOnline, setIsOnline] = useState(() => navigator.onLine);
   useEffect(() => {
+    void initStorageSync();
     const updateConnection = () => setIsOnline(navigator.onLine);
     window.addEventListener('online', updateConnection);
     window.addEventListener('offline', updateConnection);
-    return () => { window.removeEventListener('online', updateConnection); window.removeEventListener('offline', updateConnection); };
+
+    const onHydrated = (e) => {
+      const data = e?.detail || {};
+      if (data.streamflix_profile_v1) {
+        try {
+          const parsed = typeof data.streamflix_profile_v1 === 'string' ? JSON.parse(data.streamflix_profile_v1) : data.streamflix_profile_v1;
+          if (parsed && typeof parsed === 'object') {
+            setProfile((prev) => ({ ...prev, ...parsed }));
+          }
+        } catch {
+          // Ignorar fallo de parseo
+        }
+      }
+    };
+    window.addEventListener('streamflix:storage-hydrated', onHydrated);
+
+    return () => {
+      window.removeEventListener('online', updateConnection);
+      window.removeEventListener('offline', updateConnection);
+      window.removeEventListener('streamflix:storage-hydrated', onHydrated);
+    };
   }, []);
   const [profile, setProfile] = useState(() => {
     try { return { name: 'Mi Perfil', avatar: '🎬', photo: '', movieGenres: [], seriesGenres: [], autoplayTrailers: true, ...JSON.parse(localStorage.getItem('streamflix_profile_v1') || '{}') }; }
     catch { return { name: 'Mi Perfil', avatar: '🎬', photo: '', movieGenres: [], seriesGenres: [], autoplayTrailers: true }; }
   });
-  const saveProfile = (next) => { localStorage.setItem('streamflix_profile_v1', JSON.stringify(next)); setProfile(next); };
+  const saveProfile = (next) => {
+    localStorage.setItem('streamflix_profile_v1', JSON.stringify(next));
+    syncKeyToBackend('streamflix_profile_v1', next);
+    setProfile(next);
+  };
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [searching, setSearching] = useState(false);
@@ -484,7 +511,7 @@ export default function App() {
 
       <main className="flex-1 pb-20">
         {activeTab === 'downloads' ? (
-          <React.Suspense fallback={<p className="pt-28 text-center text-neutral-400">Cargando biblioteca offline…</p>}><DownloadsPage /></React.Suspense>
+          <React.Suspense fallback={<p className="pt-28 text-center text-neutral-400">Cargando biblioteca offline…</p>}><DownloadsPage onExplore={() => setActiveTab('home')} /></React.Suspense>
         ) : activeTab === 'live_tv' ? (
           <React.Suspense fallback={<p className="pt-28 text-center text-neutral-400">Preparando televisión en vivo…</p>}><LiveTV /></React.Suspense>
         ) : activeTab === 'profile' ? (
@@ -1429,6 +1456,8 @@ export default function App() {
           /></React.Suspense>
         </PlayerErrorBoundary>
       )}
+
+      <UpdateNotifier />
     </div>
   );
 }

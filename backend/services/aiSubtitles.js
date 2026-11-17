@@ -6,10 +6,10 @@ import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 import { probeMedia, selectAudioTrack } from './mediaTools.js';
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.local');
-const MODEL = process.env.WHISPER_MODEL || path.join(ROOT, 'whisper', 'ggml-base.bin');
-const CLI = process.env.WHISPER_CLI || path.join(ROOT, 'whisper', 'Release', process.platform === 'win32' ? 'whisper-cli.exe' : 'whisper-cli');
-const WORK = path.join(ROOT, 'ai-jobs');
+import { AI_JOBS_DIR as WORK, DATA_DIR } from '../config/paths.js';
+
+const MODEL = process.env.WHISPER_MODEL || path.join(DATA_DIR, 'whisper', 'ggml-base.bin');
+const CLI = process.env.WHISPER_CLI || path.join(DATA_DIR, 'whisper', 'Release', process.platform === 'win32' ? 'whisper-cli.exe' : 'whisper-cli');
 const jobs = new Map();
 let activeJob = null;
 

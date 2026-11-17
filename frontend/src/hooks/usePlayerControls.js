@@ -1,4 +1,5 @@
 import { useCallback, useEffect } from 'react';
+import usePlaybackShortcuts from './usePlaybackShortcuts.js';
 
 export function formatPlayerTime(seconds) {
   if (!Number.isFinite(Number(seconds)) || Number(seconds) <= 0) return '00:00';
@@ -25,6 +26,12 @@ export default function usePlayerControls({
     } else {
       document.exitFullscreen?.().then(() => setIsFullscreen(false)).catch(() => {});
     }
+  }, [setIsFullscreen]);
+
+  useEffect(() => {
+    const syncFullscreen = () => setIsFullscreen(document.fullscreenElement === document.getElementById('smart-player-container'));
+    document.addEventListener('fullscreenchange', syncFullscreen);
+    return () => document.removeEventListener('fullscreenchange', syncFullscreen);
   }, [setIsFullscreen]);
 
   const togglePlay = useCallback(() => {
@@ -71,27 +78,28 @@ export default function usePlayerControls({
     setIsMuted(!isMuted);
   }, [videoRef, isMuted, volume, setIsMuted]);
 
-  useEffect(() => {
-    const onKeyDown = (event) => {
-      if (event.key === 'Escape') {
-        if (activeDrawer) setActiveDrawer(null);
-        else if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
-        else handleSafeClose();
-        return;
-      }
-      if (activeServer !== 'p2p' || !videoRef.current ||
-          ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(event.target?.tagName)) return;
-      const key = event.key.toLowerCase();
-      if (key === ' ' || key === 'k') { event.preventDefault(); togglePlay(); }
-      else if (key === 'arrowright') { event.preventDefault(); seekTo(Math.min(duration || 0, trackedTimeRef.current + 10)); }
-      else if (key === 'arrowleft') { event.preventDefault(); seekTo(Math.max(0, trackedTimeRef.current - 10)); }
-      else if (key === 'f') { event.preventDefault(); toggleFullscreen(); }
-      else if (key === 'm') { event.preventDefault(); toggleMute(); }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [activeDrawer, activeServer, duration, handleSafeClose, seekTo, setActiveDrawer,
-      toggleFullscreen, toggleMute, togglePlay, trackedTimeRef, videoRef]);
+  const shortcutFeedback = usePlaybackShortcuts({
+    enabled: activeServer === 'p2p',
+    blocked: Boolean(activeDrawer),
+    getState: () => ({
+      paused: videoRef.current?.paused,
+      currentTime: trackedTimeRef.current,
+      duration: duration || videoRef.current?.duration,
+      volume,
+      muted: isMuted,
+    }),
+    onPlayPause: togglePlay,
+    onSeek: seekTo,
+    onVolume: value => handleVolumeChange({ target: { value } }),
+    onMute: toggleMute,
+    onFullscreen: toggleFullscreen,
+    onEscape: () => {
+      if (activeDrawer) setActiveDrawer(null);
+      else if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+      else handleSafeClose();
+    },
+    onActivity: triggerHudVisibility,
+  });
 
-  return { toggleFullscreen, togglePlay, handleSeek, handleVolumeChange, toggleMute };
+  return { toggleFullscreen, togglePlay, handleSeek, handleVolumeChange, toggleMute, shortcutFeedback };
 }

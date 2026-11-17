@@ -2,6 +2,9 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import api from '../services/api.js';
 import Hls from 'hls.js';
 import CustomSelect from './CustomSelect.jsx';
+import CinemaControls from './CinemaControls.jsx';
+import PlaybackFeedback from './PlaybackFeedback.jsx';
+import usePlaybackShortcuts from '../hooks/usePlaybackShortcuts.js';
 import { ChannelRowCarousel, NetflixChannelCard } from './LiveChannelCards.jsx';
 import { getCuratedChannelMix } from '../utils/channelMix.js';
 import {
@@ -10,8 +13,6 @@ import {
   Tv,
   Play,
   Pause,
-  Volume2,
-  VolumeX,
   Maximize,
   Minimize,
   RefreshCw,
@@ -28,7 +29,6 @@ import {
   SkipBack,
   PictureInPicture2,
   Layers,
-  ListVideo,
 } from 'lucide-react';
 
 // Géneros y Regiones de TV organizados estilo Netflix Live
@@ -164,7 +164,7 @@ export default function LiveTV() {
   const recoveredRef = useRef(new Set());
 
   useEffect(() => {
-    const syncFullscreen = () => setIsFullscreen(document.fullscreenElement === videoRef.current);
+    const syncFullscreen = () => setIsFullscreen(document.fullscreenElement === playerContainerRef.current);
     document.addEventListener('fullscreenchange', syncFullscreen);
     videoRef.current?.addEventListener('webkitendfullscreen', syncFullscreen);
     return () => {
@@ -177,9 +177,7 @@ export default function LiveTV() {
     if (!isFullscreenFallback) return;
     const previous = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    const closeOnEscape = (event) => { if (event.key === 'Escape') setIsFullscreenFallback(false); };
-    document.addEventListener('keydown', closeOnEscape);
-    return () => { document.body.style.overflow = previous; document.removeEventListener('keydown', closeOnEscape); };
+    return () => { document.body.style.overflow = previous; };
   }, [isFullscreenFallback]);
 
   const [favorites, setFavorites] = useState(() => {
@@ -716,16 +714,36 @@ export default function LiveTV() {
   };
 
   const toggleFullscreen = async () => {
-    const video = videoRef.current;
-    if (!video) return;
+    const container = playerContainerRef.current;
+    if (!container) return;
     if (isFullscreenFallback) { setIsFullscreenFallback(false); return; }
     try {
-      if (document.fullscreenElement === video) await document.exitFullscreen();
-      else if (video.requestFullscreen) await video.requestFullscreen();
-      else if (video.webkitEnterFullscreen) video.webkitEnterFullscreen();
+      if (document.fullscreenElement === container) await document.exitFullscreen();
+      else if (container.requestFullscreen) await container.requestFullscreen();
       else setIsFullscreenFallback(true);
     } catch { setIsFullscreenFallback(true); }
   };
+
+  const shortcutFeedback = usePlaybackShortcuts({
+    enabled: Boolean(currentChannel),
+    blocked: showEpgDrawer,
+    isActive: () => isFullscreen || isFullscreenFallback || Boolean(playerContainerRef.current?.matches(':hover') || playerContainerRef.current?.contains(document.activeElement)),
+    getState: () => ({
+      paused: videoRef.current?.paused,
+      volume: videoRef.current?.volume,
+      muted: videoRef.current?.muted,
+    }),
+    onPlayPause: togglePlay,
+    onVolume: value => handleVolumeChange({ target: { value } }),
+    onMute: toggleMute,
+    onFullscreen: toggleFullscreen,
+    onEscape: showEpgDrawer || isFullscreen || isFullscreenFallback ? () => {
+      if (showEpgDrawer) setShowEpgDrawer(false);
+      else if (isFullscreenFallback) setIsFullscreenFallback(false);
+      else document.exitFullscreen?.();
+    } : undefined,
+    onActivity: triggerHud,
+  });
 
   const handleLevelChange = (lvlIdx) => {
     const parsed = Number(lvlIdx);
@@ -801,8 +819,11 @@ export default function LiveTV() {
         <div
           ref={playerContainerRef}
           onMouseMove={triggerHud}
-          className={`relative w-full h-[78vh] sm:h-[84vh] lg:h-[88vh] bg-black overflow-hidden select-none ${isFullscreenFallback ? 'tv-fullscreen-fallback' : ''}`}
+          onTouchStart={triggerHud}
+          onFocusCapture={triggerHud}
+          className={`tv-player relative w-full h-[78vh] sm:h-[84vh] lg:h-[88vh] bg-black overflow-hidden select-none ${isFullscreenFallback ? 'tv-fullscreen-fallback' : ''}`}
         >
+          <PlaybackFeedback feedback={shortcutFeedback} />
           {/* Video En Directo a Pantalla Completa dentro del Billboard */}
           <video
             ref={videoRef}
@@ -811,8 +832,10 @@ export default function LiveTV() {
             }`}
             playsInline
             autoPlay
-            controls={isFullscreen || isFullscreenFallback}
-            onClick={isFullscreen || isFullscreenFallback ? undefined : togglePlay}
+            onClick={togglePlay}
+            onPlay={() => setIsPlaying(true)}
+            onPause={() => setIsPlaying(false)}
+            onVolumeChange={event => { setVolume(event.currentTarget.volume); setIsMuted(event.currentTarget.muted); }}
             onLoadedMetadata={(e) => {
               const vw = e.currentTarget.videoWidth;
               const vh = e.currentTarget.videoHeight;
@@ -827,6 +850,62 @@ export default function LiveTV() {
             }}
           />
           {isFullscreenFallback && <button type="button" className="tv-fullscreen-exit" onClick={() => setIsFullscreenFallback(false)} aria-label="Salir de pantalla completa">✕ Salir</button>}
+          <CinemaControls
+            live
+            visible={showHud || showEpgDrawer}
+            playing={isPlaying}
+            volume={volume}
+            muted={isMuted || volume === 0}
+            fullscreen={isFullscreen || isFullscreenFallback}
+            onTogglePlay={togglePlay}
+            onToggleMute={toggleMute}
+            onVolumeChange={value => handleVolumeChange({ target: { value } })}
+            onToggleFullscreen={toggleFullscreen}
+          >
+            <div className="flex min-w-0 items-center gap-2 overflow-x-auto [scrollbar-width:none]">
+              <button type="button" onClick={() => setShowEpgDrawer(value => !value)} className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-bold text-white hover:bg-white/20 ${showEpgDrawer ? 'bg-[#E50914]' : 'bg-white/10'}`}>Guía de canales</button>
+              {hlsLevels.length > 1 && (
+                <div className="shrink-0">
+                  <CustomSelect
+                    options={hlsSelectOptions}
+                    value={currentLevel}
+                    onChange={handleLevelChange}
+                    size="sm"
+                    align="right"
+                  />
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => setCinemaBoost(!cinemaBoost)}
+                className={`shrink-0 rounded-full border px-3 py-2 text-xs font-extrabold backdrop-blur-xl transition flex items-center gap-1.5 ${
+                  cinemaBoost
+                    ? 'bg-[#E50914]/30 text-red-200 border-[#E50914]'
+                    : 'bg-black/65 text-neutral-300 border-white/20'
+                }`}
+                title="Realce de contraste y color en vivo"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">HDR Boost</span>
+              </button>
+              <button type="button" onClick={handleLaunchVLC} className="shrink-0 rounded-full bg-orange-600/90 px-3.5 py-2 text-xs font-extrabold text-white shadow-lg transition hover:bg-orange-500">VLC</button>
+              <button type="button" onClick={togglePiP} className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/20 bg-black/70 text-white backdrop-blur-xl transition hover:bg-white/20 sm:flex" title="Picture-in-Picture" aria-label="Picture-in-Picture">
+                <PictureInPicture2 className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={(event) => toggleFavorite(currentChannel, event)}
+                className={`flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-2 text-xs font-bold backdrop-blur-md transition hover:scale-105 ${
+                  isFavorite(currentChannel)
+                    ? 'bg-amber-500/25 text-amber-300 border-amber-400/50'
+                    : 'bg-white/10 hover:bg-white/20 text-white border-white/20'
+                }`}
+              >
+                <Star className={`w-4 h-4 ${isFavorite(currentChannel) ? 'fill-current text-amber-400' : ''}`} />
+                <span className="hidden sm:inline">{isFavorite(currentChannel) ? 'En Mi Lista' : 'Mi Lista'}</span>
+              </button>
+            </div>
+          </CinemaControls>
 
           {/* Degradados Cinemáticos de Netflix (se atenúan cuando el HUD se oculta para ver limpio) */}
           <div
@@ -840,13 +919,13 @@ export default function LiveTV() {
           {/* Información Editorial del Canal En Directo Estilo Billboard Netflix */}
           <div
             key={`hero-live-${currentChannel.url}`}
-            className={`absolute bottom-24 sm:bottom-28 left-4 sm:left-8 lg:left-12 max-w-xl z-30 space-y-3.5 transition-all duration-500 ${
+            className={`absolute bottom-[108px] sm:bottom-[92px] left-4 right-4 sm:left-8 sm:right-8 lg:left-12 z-30 space-y-3.5 transition-all duration-500 ${
               showHud
                 ? 'opacity-100 translate-y-0'
                 : 'opacity-0 translate-y-4 pointer-events-none'
             }`}
           >
-            <div className="flex flex-wrap items-center gap-2.5">
+            <div className="flex flex-wrap items-center gap-2.5 max-w-xl">
               <div className="flex items-center gap-1.5">
                 <span className="text-[#E50914] font-black text-xl leading-none">N</span>
                 <span className="text-neutral-200 uppercase tracking-[0.25em] text-[11px] font-extrabold">
@@ -885,7 +964,7 @@ export default function LiveTV() {
               </span>
             </div>
 
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-4 max-w-xl">
               <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-black/80 backdrop-blur-xl border border-white/15 p-2 flex items-center justify-center shrink-0 shadow-2xl">
                 <img
                   src={currentChannel.logo}
@@ -936,106 +1015,8 @@ export default function LiveTV() {
                 <span>Siguiente</span>
                 <SkipForward className="w-4 h-4" />
               </button>
-
-              <button
-                type="button"
-                onClick={() => setShowEpgDrawer((prev) => !prev)}
-                className={`flex items-center gap-2 px-4 py-2.5 rounded-md font-bold text-xs sm:text-sm backdrop-blur-md border transition-all hover:scale-105 ${
-                  showEpgDrawer
-                    ? 'bg-[#E50914] text-white border-red-400 shadow-lg'
-                    : 'bg-black/60 hover:bg-black/80 text-white border-white/20'
-                }`}
-              >
-                <ListVideo className="w-4 h-4" />
-                <span>Guía de Canales</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={(e) => toggleFavorite(currentChannel, e)}
-                className={`flex items-center gap-1.5 px-3.5 py-2.5 rounded-md font-bold text-xs sm:text-sm backdrop-blur-md border transition-all hover:scale-105 ${
-                  isFavorite(currentChannel)
-                    ? 'bg-amber-500/25 text-amber-300 border-amber-400/50'
-                    : 'bg-black/60 hover:bg-black/80 text-white border-white/20'
-                }`}
-              >
-                <Star
-                  className={`w-4 h-4 ${
-                    isFavorite(currentChannel) ? 'fill-current text-amber-400' : ''
-                  }`}
-                />
-                <span className="hidden sm:inline">
-                  {isFavorite(currentChannel) ? 'En Mi Lista' : 'Mi Lista'}
-                </span>
-              </button>
-            </div>
-          </div>
-
-          {/* Barra Flotante Derecha de Audio/Calidad en el Billboard */}
-          <div
-            className={`absolute bottom-24 sm:bottom-28 right-4 sm:right-8 z-30 flex items-center gap-2.5 transition-opacity duration-500 ${
-              showHud ? 'opacity-100' : 'opacity-0 pointer-events-none'
-            }`}
-          >
-            {hlsLevels.length > 1 && (
-              <CustomSelect
-                options={hlsSelectOptions}
-                value={currentLevel}
-                onChange={handleLevelChange}
-                size="sm"
-                align="right"
-              />
-            )}
-
-            <button
-              type="button"
-              onClick={() => setCinemaBoost(!cinemaBoost)}
-              className={`px-3 py-2 rounded-full text-xs font-extrabold border backdrop-blur-xl transition flex items-center gap-1.5 ${
-                cinemaBoost
-                  ? 'bg-[#E50914]/30 text-red-200 border-[#E50914]'
-                  : 'bg-black/65 text-neutral-300 border-white/20'
-              }`}
-              title="Realce de contraste y color en vivo"
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">HDR Boost</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={handleLaunchVLC}
-              className="px-3.5 py-2 rounded-full bg-orange-600/90 hover:bg-orange-500 text-white text-xs font-extrabold shadow-lg transition"
-            >
-              VLC
-            </button>
-
-            <div className="flex items-center gap-2 bg-black/70 backdrop-blur-xl border border-white/20 px-3 py-2 rounded-full">
-              <button onClick={toggleMute} className="text-white hover:text-[#E50914] transition">
-                {isMuted || volume === 0 ? (
-                  <VolumeX className="w-4 h-4 text-[#E50914]" />
-                ) : (
-                  <Volume2 className="w-4 h-4" />
-                )}
-              </button>
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.05"
-                value={isMuted ? 0 : volume}
-                onChange={handleVolumeChange}
-                className="w-16 h-1 bg-neutral-600 rounded-lg appearance-none cursor-pointer accent-[#E50914]"
-              />
             </div>
 
-            <button
-              type="button"
-              onClick={togglePiP}
-              className="w-9 h-9 rounded-full bg-black/70 hover:bg-white/20 text-white border border-white/20 hidden sm:flex items-center justify-center backdrop-blur-xl transition"
-              title="Picture-in-Picture"
-            >
-              <PictureInPicture2 className="w-4 h-4" />
-            </button>
           </div>
 
           {/* Cajón Flotante Lateral de Guía EPG Estilo Netflix */}
