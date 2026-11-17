@@ -49,13 +49,7 @@ jobs:
             exit 1
           }
 
-          # 2. Exigir explícitamente el secret RELEASES_PAT para el repositorio separado
-          if ([string]::IsNullOrWhiteSpace("${{ secrets.RELEASES_PAT }}")) {
-            Write-Error "Fallo de configuración: Se exige el secret RELEASES_PAT para publicar en el repositorio de distribución separado (streamflix-releases)."
-            exit 1
-          }
-
-          # 3. Asegurar que las etiquetas remotas estén actualizadas y comprobar que el tag existe
+          # 2. Asegurar que las etiquetas remotas estén actualizadas y comprobar que el tag existe
           git fetch --tags --force
           $tagCommit = git rev-parse -q --verify "refs/tags/$gitTag"
           if (-not $tagCommit) {
@@ -170,9 +164,9 @@ jobs:
       - name: Publish Stable Release to Public Repository
         shell: pwsh
         env:
-          GH_TOKEN: ${{ secrets.RELEASES_PAT }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ steps.check_version.outputs.RELEASE_TAG }}
-          DIST_REPO: ShionBanned/streamflix-releases
+          DIST_REPO: ShionBanned/streamflix-pro
         run: |
           $distDir = "dist-electron"
           $version = "${{ steps.check_version.outputs.VERSION }}"

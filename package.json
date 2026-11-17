@@ -75,7 +75,7 @@
     "publish": {
       "provider": "github",
       "owner": "ShionBanned",
-      "repo": "streamflix-releases"
+      "repo": "streamflix-pro"
     }
   }
 }
