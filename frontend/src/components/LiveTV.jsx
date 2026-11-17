@@ -64,6 +64,13 @@ const TV_GENRE_OPTIONS = [
     description: 'Fútbol en vivo, torneos internacionales y análisis deportivo 24h',
   },
   {
+    id: 'Temáticos 24/7',
+    value: 'Temáticos 24/7',
+    label: 'Temáticos 24/7',
+    icon: '🌿',
+    description: 'Señales temáticas continuas presentes en tus listas disponibles',
+  },
+  {
     id: 'Colombia',
     value: 'Colombia',
     label: 'Televisión de Colombia',
@@ -337,6 +344,10 @@ export default function LiveTV() {
   const [showEpgDrawer, setShowEpgDrawer] = useState(false);
 
   const [currentChannel, setCurrentChannel] = useState(null);
+  const [sourceIndex, setSourceIndex] = useState(0);
+  const [showHidden, setShowHidden] = useState(false);
+  const [hiddenCount, setHiddenCount] = useState(0);
+  const [recoveredChannel, setRecoveredChannel] = useState('');
   const [playerError, setPlayerError] = useState(false);
   const [audioOnlyWarning, setAudioOnlyWarning] = useState(false);
   const [usingProxy, setUsingProxy] = useState(true);
@@ -360,6 +371,7 @@ export default function LiveTV() {
   const watchdogTimerRef = useRef(null);
   const hudTimerRef = useRef(null);
   const autoRetriedDirectRef = useRef(false);
+  const recoveredRef = useRef(new Set());
 
   useEffect(() => {
     const syncFullscreen = () => setIsFullscreen(document.fullscreenElement === videoRef.current);
@@ -444,12 +456,14 @@ export default function LiveTV() {
 
         const data = await api.getIptvChannels({
           refresh: forceRefresh,
+          includeHidden: showHidden,
           customUrls,
           xtream,
         });
 
         const list = data?.channels || [];
         setChannels(list);
+        setHiddenCount(data?.hiddenCount || 0);
 
         if (!currentChannel && list.length > 0) {
           const firstFav = list.find((c) => favorites.includes(c.url));
@@ -463,12 +477,12 @@ export default function LiveTV() {
         setRefreshing(false);
       }
     },
-    [customSources, currentChannel, favorites]
+    [customSources, currentChannel, favorites, showHidden]
   );
 
   useEffect(() => {
     loadChannels();
-  }, []);
+  }, [showHidden]);
 
   const toggleFavorite = (channel, e) => {
     if (e) e.stopPropagation();
@@ -510,9 +524,44 @@ export default function LiveTV() {
       hlsRef.current = null;
     }
 
+    const sources = currentChannel.sources?.length ? currentChannel.sources : [{ url: currentChannel.url }];
+    const source = sources[sourceIndex] || sources[0];
+    let stopped = false;
+    let backupRequested = false;
+    let retryTimer = null;
+    let successReported = false;
+    const reportNetworkFailure = () => {
+      if (source.healthId) api.reportIptvHealth(source.healthId, 'network_error').catch(() => {});
+    };
+    let progressStart = null;
+    const onProgress = () => {
+      if (successReported || !source.healthId || video.videoHeight <= 0 || video.paused) return;
+      if (progressStart === null) progressStart = video.currentTime;
+      if (video.currentTime - progressStart >= 2) {
+        successReported = true;
+        api.reportIptvHealth(source.healthId, 'playing').then(() => {
+          if (currentChannel.hidden && !recoveredRef.current.has(currentChannel.url)) {
+            recoveredRef.current.add(currentChannel.url);
+            setRecoveredChannel(currentChannel.url);
+            setHiddenCount(count => Math.max(0, count - 1));
+          }
+        }).catch(() => {});
+      }
+    };
+    video.addEventListener('timeupdate', onProgress);
+    const tryBackup = () => {
+      if (stopped) return false;
+      if (backupRequested) return true;
+      if (sourceIndex + 1 >= sources.length) return false;
+      backupRequested = true;
+      autoRetriedDirectRef.current = false;
+      setUsingProxy(true);
+      setSourceIndex(sourceIndex + 1);
+      return true;
+    };
     const streamTarget = usingProxy
-      ? `/api/iptv/proxy?url=${encodeURIComponent(currentChannel.url)}`
-      : currentChannel.url;
+      ? `/api/iptv/proxy?url=${encodeURIComponent(source.url)}`
+      : source.url;
 
     if (Hls.isSupported()) {
       const hls = new Hls({
@@ -562,7 +611,7 @@ export default function LiveTV() {
         });
 
         watchdogTimerRef.current = setTimeout(() => {
-          if (!videoRef.current) return;
+          if (stopped || !videoRef.current) return;
           const vw = videoRef.current.videoWidth;
           const vh = videoRef.current.videoHeight;
 
@@ -573,14 +622,14 @@ export default function LiveTV() {
               setCurrentLevel(nextLvl);
             }
 
-            setTimeout(() => {
-              if (!videoRef.current) return;
+            retryTimer = setTimeout(() => {
+              if (stopped || !videoRef.current) return;
               if (videoRef.current.videoWidth === 0 && !videoRef.current.paused) {
                 if (usingProxy && !autoRetriedDirectRef.current) {
                   autoRetriedDirectRef.current = true;
                   setUsingProxy(false);
                 } else {
-                  setAudioOnlyWarning(true);
+                  if (!tryBackup()) setAudioOnlyWarning(true);
                 }
               }
             }, 2500);
@@ -598,7 +647,8 @@ export default function LiveTV() {
                 autoRetriedDirectRef.current = true;
                 setUsingProxy(false);
               } else {
-                setPlayerError(true);
+                reportNetworkFailure();
+                if (!tryBackup()) setPlayerError(true);
                 hls.destroy();
               }
               break;
@@ -606,7 +656,7 @@ export default function LiveTV() {
               hls.recoverMediaError();
               break;
             default:
-              setPlayerError(true);
+              if (!tryBackup()) setPlayerError(true);
               hls.destroy();
               break;
           }
@@ -619,19 +669,25 @@ export default function LiveTV() {
       video.addEventListener('loadedmetadata', () => {
         video.play().catch(() => {});
       });
+      video.onerror = () => { if (video.error?.code === 2) reportNetworkFailure(); if (!tryBackup()) setPlayerError(true); };
     }
 
     return () => {
+      stopped = true;
+      video.removeEventListener('timeupdate', onProgress);
       if (watchdogTimerRef.current) clearTimeout(watchdogTimerRef.current);
+      if (retryTimer) clearTimeout(retryTimer);
+      video.onerror = null;
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
       }
     };
-  }, [currentChannel, usingProxy]);
+  }, [currentChannel, usingProxy, sourceIndex]);
 
   const handleSelectChannel = (channel) => {
     autoRetriedDirectRef.current = false;
+    setSourceIndex(0);
     setUsingProxy(true);
     setPlayerError(false);
     setAudioOnlyWarning(false);
@@ -651,6 +707,8 @@ export default function LiveTV() {
       );
     } else if (selectedCategory === 'Deportes') {
       result = result.filter((c) => c.category === 'Deportes');
+    } else if (selectedCategory === 'Temáticos 24/7') {
+      result = result.filter((c) => c.category === 'Temáticos 24/7');
     } else if (selectedCategory === 'Colombia') {
       result = result.filter((c) => c.country === 'co' || c.category === 'Colombia');
     } else if (selectedCategory === 'Latam') {
@@ -788,7 +846,7 @@ export default function LiveTV() {
     try {
       const res = await api.launchExternalPlayer({
         player: 'vlc',
-        streamUrl: currentChannel.url,
+        streamUrl: currentChannel.sources?.[sourceIndex]?.url || currentChannel.url,
         title: currentChannel.name,
       });
 
@@ -798,10 +856,10 @@ export default function LiveTV() {
           text: '✓ Reproduciendo en VLC Media Player',
         });
       } else {
-        window.location.href = `vlc://${currentChannel.url}`;
+        window.location.href = `vlc://${currentChannel.sources?.[sourceIndex]?.url || currentChannel.url}`;
       }
     } catch {
-      window.location.href = `vlc://${currentChannel.url}`;
+      window.location.href = `vlc://${currentChannel.sources?.[sourceIndex]?.url || currentChannel.url}`;
     }
 
     setTimeout(() => setLaunchMessage(null), 4000);
@@ -996,6 +1054,14 @@ export default function LiveTV() {
                 </span>
               )}
 
+              {(currentChannel.sources?.length || 0) > 1 && (
+                <span className="px-2 py-0.5 bg-black/60 border border-white/20 text-neutral-200 text-[10px] font-bold rounded">
+                  Fuente {sourceIndex + 1}/{currentChannel.sources.length}
+                </span>
+              )}
+
+              {currentChannel.hidden && recoveredChannel !== currentChannel.url && <span className="px-2 py-0.5 bg-amber-500/20 border border-amber-500/40 text-amber-200 text-[10px] font-bold rounded">En revisión</span>}
+
               <span className="px-2 py-0.5 bg-white/10 border border-white/15 text-neutral-200 text-[10px] font-bold rounded">
                 {currentChannel.category} • {currentChannel.countryName || 'Internacional'}
               </span>
@@ -1020,9 +1086,8 @@ export default function LiveTV() {
             </div>
 
             <p className="text-xs sm:text-sm text-neutral-200/90 max-w-lg drop-shadow">
-              Estás viendo la señal oficial en directo de{' '}
-              <strong className="text-white">{currentChannel.name}</strong> con conmutación H.264
-              instantánea y motor de nitidez activo.
+              Señal disponible de <strong className="text-white">{currentChannel.name}</strong>.
+              Si una fuente falla, probaremos otra opción del mismo canal.
             </p>
 
             {/* Botones Principales Estilo Netflix */}
@@ -1368,6 +1433,8 @@ export default function LiveTV() {
               <PlusCircle className="w-4 h-4 text-emerald-400" />
               <span className="hidden sm:inline">+ Lista M3U / Xtream</span>
             </button>
+
+            {hiddenCount > 0 && <button type="button" onClick={() => setShowHidden(value => !value)} className="px-3.5 py-2 bg-[#181818] hover:bg-neutral-800 text-amber-200 text-xs font-bold rounded-xl border border-amber-500/25">{showHidden ? 'Ocultar inactivos' : `Ver ${hiddenCount} en revisión`}</button>}
 
             <button
               type="button"

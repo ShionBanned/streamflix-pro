@@ -77,6 +77,8 @@ export default function Navbar({
     { id: 'movies', label: 'Películas' },
     { id: 'anime', label: 'Anime' },
     { id: 'live_tv', label: 'TV en Vivo' },
+    { id: 'premium', label: 'Premium' },
+    { id: 'downloads', label: 'Offline' },
     { id: 'watchlist', label: 'Mi lista' },
   ];
 

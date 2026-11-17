@@ -1,6 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 
-export default function ExternalAudio({ videoRef, videoKey, sourcePages = {}, cloudClock = null, onActiveChange }) {
+const directMedia = url => {
+  try { return /^https?:$/.test(new URL(url).protocol) && /\.(?:mp3|m4a|aac|wav|ogg|opus|flac|mp4|webm)$/i.test(new URL(url).pathname); }
+  catch { return false; }
+};
+
+export default function ExternalAudio({ videoRef, videoKey, sourcePages = {}, cloudClock = null, onActiveChange, onPlaySiteServer, title = '', mediaType = 'movie', season = 1, episode = 1 }) {
   const audioRef = useRef(null);
   const objectUrlRef = useRef(null);
   const previousMuteRef = useRef(false);
@@ -9,6 +14,15 @@ export default function ExternalAudio({ videoRef, videoKey, sourcePages = {}, cl
   const [urlInput, setUrlInput] = useState('');
   const [sourceSite, setSourceSite] = useState('other');
   const [error, setError] = useState('');
+  const [searchQuery, setSearchQuery] = useState(title);
+  const [candidates, setCandidates] = useState([]);
+  const [tracks, setTracks] = useState([]);
+  const [siteResult, setSiteResult] = useState(null);
+  const [searching, setSearching] = useState(false);
+  const [searchMessage, setSearchMessage] = useState('');
+  const [resolvedPage, setResolvedPage] = useState('');
+
+  useEffect(() => { setSearchQuery(title); setCandidates([]); setTracks([]); setSearchMessage(''); }, [title, videoKey]);
 
   useEffect(() => {
     const video = videoRef?.current; const audio = audioRef.current;
@@ -88,25 +102,56 @@ export default function ExternalAudio({ videoRef, videoKey, sourcePages = {}, cl
     setFileName(file.name);
     setError('');
   };
-  const useUrl = () => {
+  const activateUrl = (input, label = '') => {
     try {
-      const url = new URL(urlInput.trim());
-      if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || !/\.(?:mp3|m4a|aac|wav|ogg|opus|flac|mp4|webm)(?:$)/i.test(url.pathname)) throw new Error();
+      const url = new URL(input.trim());
+      if (!directMedia(url.href) || url.username || url.password) throw new Error();
       if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
       objectUrlRef.current = null;
       const params = new URLSearchParams({ url: url.href });
       if (sourceSite !== 'other') {
-        const expectedHost = sourceSite === 'animeav1' ? 'animeav1.com' : 'cuevana3t.pro';
-        let referer = sourcePages[sourceSite];
+        const expectedHost = { animeav1: 'animeav1.com', animeflv: 'animeflv.or.at', pelisplus: 'pelisplushd.la', cuevana: 'cuevana3t.pro' }[sourceSite];
+        let referer = resolvedPage || sourcePages[sourceSite];
         try { if (new URL(referer).hostname !== expectedHost && !(sourceSite === 'cuevana' && new URL(referer).hostname === 'cuevana3w.pro')) referer = ''; } catch { referer = ''; }
         params.set('ref', referer || `https://${expectedHost}/`);
       }
       audioRef.current.src = `/api/iptv/proxy?${params}`;
-      setFileName(url.hostname);
+      setFileName(label || url.hostname);
       setError('');
     } catch {
       setError('Pega una URL directa de audio o MP4/WebM. Una página iframe no es una pista de audio.');
     }
+  };
+  const useUrl = () => activateUrl(urlInput);
+  const resolveCandidate = async (candidate, site = sourceSite) => {
+    setSearching(true); setSearchMessage('Buscando pistas reproducibles…'); setTracks([]);
+    try {
+      const params = new URLSearchParams({ source: site, titleUrl: candidate.titleUrl, season: String(season), episode: String(episode) });
+      const response = await fetch(`/api/site-resolve?${params}`, { signal: AbortSignal.timeout(20000) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'No se pudo abrir el título.');
+      setResolvedPage(data.pageUrl || '');
+      const found = (data.servers || []).filter(server => !server.pageOnly);
+      setSiteResult(data);
+      setTracks(found); setCandidates([]);
+      setSearchMessage(found.length ? 'Elige una pista directa para sincronizar o abre una versión del video con el idioma indicado.' : 'Se encontró el título, pero no publicó pistas ni reproductores compatibles.');
+    } catch (cause) { setSearchMessage(cause.message || 'No se pudieron buscar pistas.'); }
+    finally { setSearching(false); }
+  };
+  const searchAudio = async (site = sourceSite) => {
+    if (site === 'other' || searchQuery.trim().length < 2) return;
+    setSearching(true); setCandidates([]); setTracks([]); setSearchMessage('Buscando el título…');
+    try {
+      const params = new URLSearchParams({ source: site, title: searchQuery.trim() });
+      const response = await fetch(`/api/site-search?${params}`, { signal: AbortSignal.timeout(20000) });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'No se pudo buscar el título.');
+      const matches = (data.candidates || []).filter(candidate => site.startsWith('anime') || candidate.type === mediaType);
+      if (!matches.length) { setSearchMessage('No hubo coincidencias para este título. Prueba otro nombre.'); return; }
+      if (matches[0].score === 1 && (matches.length === 1 || matches[1].score < 1)) await resolveCandidate(matches[0], site);
+      else { setCandidates(matches); setSearchMessage('Elige el título correcto para buscar sus pistas.'); }
+    } catch (cause) { setSearchMessage(cause.message || 'No se pudieron buscar pistas.'); }
+    finally { setSearching(false); }
   };
   const clear = () => {
     setFileName(''); audioRef.current?.pause(); audioRef.current?.removeAttribute('src');
@@ -117,11 +162,15 @@ export default function ExternalAudio({ videoRef, videoKey, sourcePages = {}, cl
     <p className="font-semibold">Audio alternativo sincronizado</p>
     <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-2 items-center">
       <label className="cursor-pointer rounded bg-neutral-800 px-2 py-1.5">Cargar archivo<input type="file" accept="audio/*,.m4a,.aac,.mp3,.opus,.wav,.flac" className="hidden" onChange={choose} /></label>
-      <select aria-label="Procedencia del enlace de audio" value={sourceSite} onChange={event => setSourceSite(event.target.value)} className="min-w-0 w-full rounded bg-neutral-800 border border-white/10 px-2 py-1.5 text-white"><option value="other">Otra fuente</option><option value="cuevana">Cuevana (URL directa)</option><option value="animeav1">AnimeAV1 (URL directa)</option></select>
+      <select aria-label="Procedencia del enlace de audio" value={sourceSite} onChange={event => { const site = event.target.value; setSourceSite(site); setCandidates([]); setTracks([]); setResolvedPage(''); setSearchMessage(''); if (site !== 'other') searchAudio(site); }} className="min-w-0 w-full rounded bg-neutral-800 border border-white/10 px-2 py-1.5 text-white"><option value="other">Otra fuente</option><option value="cuevana">Cuevana</option><option value="animeav1">AnimeAV1</option><option value="pelisplus">PelisPlus</option><option value="animeflv">AnimeFLV</option></select>
+      {sourceSite !== 'other' && <div className="col-span-2 flex gap-2"><input type="search" aria-label="Buscar título para audio" value={searchQuery} onChange={event => setSearchQuery(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') searchAudio(); }} className="min-w-0 flex-1 rounded bg-neutral-800 border border-white/10 px-2 py-1.5 text-white" /><button type="button" onClick={() => searchAudio()} disabled={searching || searchQuery.trim().length < 2} className="rounded bg-[#E50914] px-3 py-1.5 font-semibold disabled:opacity-50">{searching ? 'Buscando…' : 'Buscar audio'}</button></div>}
+      {sourceSite !== 'other' && candidates.length > 0 && <div className="col-span-2 max-h-32 overflow-y-auto space-y-1">{candidates.map(candidate => <button key={candidate.titleUrl} type="button" onClick={() => resolveCandidate(candidate)} className="block w-full rounded bg-neutral-800 px-2 py-1.5 text-left">{candidate.title}{candidate.year ? ` · ${candidate.year}` : ''}</button>)}</div>}
+      {sourceSite !== 'other' && tracks.length > 0 && <div className="col-span-2 max-h-40 overflow-y-auto space-y-1">{tracks.map(track => <button key={track.url} type="button" onClick={() => { if (directMedia(track.url)) activateUrl(track.url, `${track.name} · ${track.audioLabel}`); else { clear(); onPlaySiteServer?.(sourceSite, siteResult, track); } }} className="block w-full rounded bg-neutral-800 px-2 py-1.5 text-left"><span className="block font-semibold">{directMedia(track.url) ? 'Usar audio' : 'Ver versión'} · {track.name}</span><span className="text-neutral-400">{track.audioLabel}</span></button>)}</div>}
+      {sourceSite !== 'other' && searchMessage && <p role="status" className="col-span-2 text-[11px] text-neutral-300">{searchMessage}</p>}
       <input type="url" aria-label="URL directa de audio" value={urlInput} onChange={event => setUrlInput(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') useUrl(); }} placeholder="URL de audio (.mp3, .m4a…)" className="col-span-2 w-full min-w-0 rounded bg-neutral-800 border border-white/10 px-2 py-1.5 text-white" />
       <button type="button" onClick={useUrl} disabled={!urlInput.trim()} className="col-span-2 rounded bg-neutral-700 px-2 py-1.5 text-left font-semibold disabled:opacity-50">Usar URL de audio</button>
     </div>
-    <p className="text-[11px] text-neutral-400">Carga un archivo de audio o pega la URL directa de una pista. Elegir Cuevana o AnimeAV1 solo configura la procedencia del enlace; no busca ni descarga el audio automáticamente.</p>
+    <p className="text-[11px] text-neutral-400">Busca una pista directa por título, carga un archivo o pega una URL de audio. Las páginas de reproductor no contienen necesariamente una pista de audio independiente.</p>
     {error && <p role="alert" className="text-amber-300">{error}</p>}
     {fileName && <div className="flex flex-wrap gap-2 items-center"><span className="max-w-36 truncate" title={fileName}>{fileName}</span>{cloudClock && <button type="button" onClick={startCloudAudio} className="rounded bg-[#E50914] px-2 py-1 font-semibold">▶ Iniciar audio</button>}<label>Desfase (s) <input className="w-16 rounded bg-neutral-800 p-1" type="number" min="-120" max="120" step="0.1" value={offset} onChange={event => { const n = Number(event.target.value); if (Number.isFinite(n) && Math.abs(n) <= 120) changeOffset(n); }} /></label><button onClick={() => changeOffset(offset - 0.1)} className="rounded bg-neutral-800 px-2 py-1">−0.1 s</button><button onClick={() => changeOffset(offset + 0.1)} className="rounded bg-neutral-800 px-2 py-1">+0.1 s</button><button onClick={clear} className="rounded bg-neutral-700 px-2 py-1">Quitar audio</button></div>}
     {fileName && cloudClock && <p className="text-[11px] text-neutral-400">{cloudClock.confirmed ? 'Sincronización automática por los eventos del servidor.' : 'Este servidor no comunica su posición. Inicia el audio al mismo tiempo que el video y ajusta el desfase; silencia el audio original en el reproductor Cloud.'}</p>}

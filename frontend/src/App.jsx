@@ -5,13 +5,16 @@ import HeroBanner from './components/HeroBanner.jsx';
 import PlatformHubs from './components/PlatformHubs.jsx';
 import MediaGrid from './components/MediaGrid.jsx';
 import DetailModal from './components/DetailModal.jsx';
-import SmartPlayer from './components/SmartPlayer.jsx';
-import LiveTV from './components/LiveTV.jsx';
 import BrandLogo from './components/BrandLogo.jsx';
 import CustomSelect from './components/CustomSelect.jsx';
 import ProfilePage from './components/ProfilePage.jsx';
 import DiscoveryRows, { buildGenreRows } from './components/DiscoveryRows.jsx';
 import useUserMedia, { computePersonalizedPool } from './hooks/useUserMedia.js';
+
+const SmartPlayer = React.lazy(() => import('./components/SmartPlayer.jsx'));
+const LiveTV = React.lazy(() => import('./components/LiveTV.jsx'));
+const DownloadsPage = React.lazy(() => import('./components/DownloadsPage.jsx'));
+const PremiumAccess = React.lazy(() => import('./components/PremiumAccess.jsx'));
 import {
   Film,
   Tv,
@@ -322,8 +325,58 @@ function ensureRowItems(sectionItems = [], fallbackPool = [], genreIds = [], sli
   return out;
 }
 
+class PlayerErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error, errorInfo) {
+    console.error('[PlayerErrorBoundary] Error atrapado en SmartPlayer:', error, errorInfo);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="fixed inset-0 z-50 bg-[#0a0a0a] flex flex-col items-center justify-center p-6 text-white text-center space-y-4">
+          <div className="w-14 h-14 rounded-full bg-red-600/20 border border-red-500/40 flex items-center justify-center text-red-500 text-2xl font-bold">
+            !
+          </div>
+          <h2 className="text-xl font-bold">Interrupción inesperada de reproducción</h2>
+          <p className="text-sm text-neutral-400 max-w-md">
+            {this.state.error?.message || 'Ocurrió un problema durante la reproducción.'}
+          </p>
+          <div className="flex gap-3 pt-2">
+            <button
+              onClick={() => this.setState({ hasError: false, error: null })}
+              className="px-5 py-2.5 bg-[#E50914] text-white rounded-lg text-sm font-bold hover:bg-red-700 transition"
+            >
+              Reintentar reproducción
+            </button>
+            <button
+              onClick={this.props.onClose}
+              className="px-5 py-2.5 bg-white/10 text-white rounded-lg text-sm font-bold hover:bg-white/20 transition"
+            >
+              Cerrar reproductor
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState('home');
+  const [isOnline, setIsOnline] = useState(() => navigator.onLine);
+  useEffect(() => {
+    const updateConnection = () => setIsOnline(navigator.onLine);
+    window.addEventListener('online', updateConnection);
+    window.addEventListener('offline', updateConnection);
+    return () => { window.removeEventListener('online', updateConnection); window.removeEventListener('offline', updateConnection); };
+  }, []);
   const [profile, setProfile] = useState(() => {
     try { return { name: 'Mi Perfil', avatar: '🎬', photo: '', movieGenres: [], seriesGenres: [], autoplayTrailers: true, ...JSON.parse(localStorage.getItem('streamflix_profile_v1') || '{}') }; }
     catch { return { name: 'Mi Perfil', avatar: '🎬', photo: '', movieGenres: [], seriesGenres: [], autoplayTrailers: true }; }
@@ -739,9 +792,20 @@ export default function App() {
         profile={profile}
       />
 
+      {!isOnline && activeTab !== 'downloads' && (
+        <div role="status" className="mt-20 mx-4 sm:mx-8 rounded-lg border border-emerald-500/30 bg-emerald-950/90 px-4 py-3 flex items-center justify-between gap-3 text-sm">
+          <span>Estás sin conexión. Tus videos guardados siguen disponibles en este equipo.</span>
+          <button type="button" onClick={() => setActiveTab('downloads')} className="shrink-0 rounded bg-emerald-600 px-3 py-1.5 font-bold hover:bg-emerald-500">Ver descargas</button>
+        </div>
+      )}
+
       <main className="flex-1 pb-20">
-        {activeTab === 'live_tv' ? (
-          <LiveTV />
+        {activeTab === 'downloads' ? (
+          <React.Suspense fallback={<p className="pt-28 text-center text-neutral-400">Cargando biblioteca offline…</p>}><DownloadsPage /></React.Suspense>
+        ) : activeTab === 'premium' ? (
+          <React.Suspense fallback={<p className="pt-28 text-center text-neutral-400">Cargando proveedores…</p>}><PremiumAccess onOpenLiveTv={() => setActiveTab('live_tv')} /></React.Suspense>
+        ) : activeTab === 'live_tv' ? (
+          <React.Suspense fallback={<p className="pt-28 text-center text-neutral-400">Preparando televisión en vivo…</p>}><LiveTV /></React.Suspense>
         ) : activeTab === 'profile' ? (
           <ProfilePage profile={profile} onSave={saveProfile} movieGenres={MOVIE_GENRES} seriesGenres={SERIES_GENRES} preferredLanguage={preferredLanguage} onChangeLanguage={setPreferredLanguage} audioEnginePreset={audioEnginePreset} onChangeAudioPreset={setAudioEnginePreset} />
         ) : activeTab === 'watchlist' ? (
@@ -1668,19 +1732,21 @@ export default function App() {
       )}
 
       {playerConfig && (
-        <SmartPlayer
-          item={playerConfig.item}
-          season={playerConfig.season}
-          episode={playerConfig.episode}
-          initialTime={playerConfig.initialTime || 0}
-          initialLanguage={playerConfig.language || preferredLanguage}
-          audioEnginePreset={audioEnginePreset}
-          onChangeAudioPreset={setAudioEnginePreset}
-          onClose={() => setPlayerConfig(null)}
-          onSaveProgress={saveProgress}
-          onChangeLanguage={setPreferredLanguage}
-          onPlayNextEpisode={(nextConfig) => setPlayerConfig(nextConfig)}
-        />
+        <PlayerErrorBoundary onClose={() => setPlayerConfig(null)}>
+          <React.Suspense fallback={<p className="fixed inset-0 z-50 grid place-items-center bg-black text-white">Preparando reproductor…</p>}><SmartPlayer
+            item={playerConfig.item}
+            season={playerConfig.season}
+            episode={playerConfig.episode}
+            initialTime={playerConfig.initialTime || 0}
+            initialLanguage={playerConfig.language || preferredLanguage}
+            audioEnginePreset={audioEnginePreset}
+            onChangeAudioPreset={setAudioEnginePreset}
+            onClose={() => setPlayerConfig(null)}
+            onSaveProgress={saveProgress}
+            onChangeLanguage={setPreferredLanguage}
+            onPlayNextEpisode={(nextConfig) => setPlayerConfig(nextConfig)}
+          /></React.Suspense>
+        </PlayerErrorBoundary>
       )}
     </div>
   );

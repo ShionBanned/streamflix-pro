@@ -13,7 +13,19 @@ import { checkCloudHealth, probeMirror } from '../services/cloudHealth.js';
 import { validateSitePage, validateSiteTitle, parseSiteSearchResults, resolveSitePage, parseCuevanaServers, parseAnimeAv1Servers, getSiteServers, getResolvedSiteServers } from '../services/siteServers.js';
 import { parseMediaInfo, selectAudioTrack, probeMedia, streamFfmpeg, waitForTorrent } from '../services/mediaTools.js';
 import { hasGuaranteedBrowserAudio, isBrowserNativeCompatible } from '../services/torrentio.js';
-import { proxyStream, parseM3UContent } from '../services/iptvParser.js';
+import { proxyStream, parseM3UContent, groupDuplicateChannels } from '../services/iptvParser.js';
+
+test('IPTV groups quality variants into one channel and keeps distinct identities separate', () => {
+  const common = { country: 'co', category: 'Deportes', source: 'Prueba', logo: null };
+  const grouped = groupDuplicateChannels([
+    { ...common, id: 'win.co@HD', name: 'Canal Uno HD', url: 'https://example.com/hd.m3u8', isHevcHint: true },
+    { ...common, id: 'win.co@SD', name: 'Canal Uno SD', url: 'https://example.com/sd.m3u8', isHevcHint: false },
+    { ...common, id: 'other.co', name: 'Canal Uno HD', url: 'https://example.com/other.m3u8' },
+  ]);
+  assert.equal(grouped.length, 2);
+  assert.deepEqual(grouped[0].sources.map(source => source.url), ['https://example.com/sd.m3u8', 'https://example.com/hd.m3u8']);
+  assert.equal(grouped[0].url, 'https://example.com/sd.m3u8');
+});
 import { getContentRating } from '../../frontend/src/utils/contentRating.js';
 import { getCuratedChannelMix } from '../../frontend/src/utils/channelMix.js';
 

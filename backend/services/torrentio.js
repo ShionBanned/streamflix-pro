@@ -1,6 +1,7 @@
 import { buildEmbedServers } from '../../shared/cloudProviders.mjs';
 import axios from 'axios';
 import https from 'https';
+import { queryAddonSources } from './addonSources.js';
 
 const TORRENTIO_EXTENDED_BASE =
   'https://torrentio.strem.fun/providers=yts,eztv,rarbg,1337x,thepiratebay,kickasstorrents,torrentgalaxy,magnetdl,horriblesubs,nyaasi,tokyotosho,anidex,mejortorrent,wolfmax4k,cinecalidad,pelisenhd,spanish,besttorrents|language=latino,spanish/stream';
@@ -218,6 +219,8 @@ function scoreStream(stream, isAnime = false, preferredLanguage = 'latino') {
 
   score += Math.min(seeders * 3, 620);
   if (seeders >= SEEDER_THRESHOLD) score += 300;
+  if (seeders >= 30) score += 200; // Bonus enjambre ultra saludable (velocidad garantizada)
+  if (seeders < 5) score -= 350; // Penalización para fuentes moribundas que causan tirones y cortes frecuentes
 
   return score;
 }
@@ -266,6 +269,7 @@ export async function getTorrentioStreams({
       recommendedServer: 'vidsrc',
       bestStream: null,
       streams: [],
+      addonStatuses: [],
       languageSummary: { latino: 0, castellano: 0, vose: 0, aacGuaranteed: 0, total: 0 },
       embedServers,
       threshold: SEEDER_THRESHOLD,
@@ -278,14 +282,16 @@ export async function getTorrentioStreams({
 
   try {
     let rawStreams = [];
+    let addonStatuses = [];
     const cached = torrentioCache.get(cacheKey);
 
     if (cached && now - cached.timestamp < CACHE_TTL) {
       rawStreams = cached.streams;
+      addonStatuses = cached.addonStatuses || [];
     } else {
       const endpoint = `${TORRENTIO_EXTENDED_BASE}/${isSeries ? 'series' : 'movie'}/${queryId}.json`;
 
-      const [torrentioRes, ytsStreams] = await Promise.all([
+      const [torrentioRes, ytsStreams, addons] = await Promise.all([
         axios
           .get(endpoint, {
             timeout: 6500,
@@ -297,27 +303,27 @@ export async function getTorrentioStreams({
           .then((r) => r.data?.streams || [])
           .catch(() => []),
         !isSeries ? fetchYtsDirectStreams(imdbId) : Promise.resolve([]),
+        queryAddonSources({ imdbId, isSeries, season: season || 1, episode: episode || 1 }),
       ]);
+      addonStatuses = addons.statuses;
 
       // Combinar streams de YTS Direct MP4/AAC con Torrentio sin duplicar infoHash
-      const seenHashes = new Set();
+      const seenStreams = new Set();
       rawStreams = [];
 
-      for (const s of [...ytsStreams, ...torrentioRes]) {
-        if (!s?.infoHash) continue;
-        const h = String(s.infoHash).toLowerCase();
-        if (seenHashes.has(h) && !s.fileIdx) continue;
-        seenHashes.add(h);
+      for (const s of [...ytsStreams, ...torrentioRes, ...addons.streams]) {
+        if (!s?.infoHash && !s?.url) continue;
+        const key = s.infoHash ? `${String(s.infoHash).toLowerCase()}:${s.fileIdx ?? ''}` : s.url;
+        if (seenStreams.has(key)) continue;
+        seenStreams.add(key);
         rawStreams.push(s);
       }
 
-      if (rawStreams.length > 0) {
-        torrentioCache.set(cacheKey, { streams: rawStreams, timestamp: now });
-      }
+      torrentioCache.set(cacheKey, { streams: rawStreams, addonStatuses, timestamp: now });
     }
 
     const parsedStreams = rawStreams
-      .filter((s) => s.infoHash)
+      .filter((s) => s.infoHash || s.url)
       .map((s) => {
         const seeders = extractSeeders(s.title);
         const resolution = extractResolution(`${s.name || ''} ${s.title || ''}`);
@@ -348,7 +354,9 @@ export async function getTorrentioStreams({
         const qs = queryParams.toString();
 
         return {
-          infoHash: String(s.infoHash).toLowerCase(),
+          infoHash: s.infoHash ? String(s.infoHash).toLowerCase() : null,
+          url: s.url || null,
+          source: s.addonSource || (s.isYtsDirect ? 'yts' : 'torrentio'),
           title: s.title,
           cleanTitle: firstLine,
           displayLabel,
@@ -365,18 +373,18 @@ export async function getTorrentioStreams({
           size,
           browserNative,
           score,
-          streamUrl: `/api/stream/${String(s.infoHash).toLowerCase()}${qs ? `?${qs}` : ''}`,
+          streamUrl: s.infoHash ? `/api/stream/${String(s.infoHash).toLowerCase()}${qs ? `?${qs}` : ''}` : s.url,
         };
       })
       .sort((a, b) => b.score - a.score);
 
     const bestGuaranteedStream = parsedStreams.find(
-      (s) => s.audioGuaranteed && s.seeders >= SEEDER_THRESHOLD
+      (s) => s.infoHash && s.audioGuaranteed && s.seeders >= SEEDER_THRESHOLD
     );
     const bestNativeStream =
       bestGuaranteedStream ||
-      parsedStreams.find((s) => s.browserNative && s.seeders >= SEEDER_THRESHOLD);
-    const bestStream = bestNativeStream || parsedStreams[0] || null;
+      parsedStreams.find((s) => s.infoHash && s.browserNative && s.seeders >= SEEDER_THRESHOLD);
+    const bestStream = bestNativeStream || parsedStreams.find(s => s.infoHash) || parsedStreams[0] || null;
     const shouldStartWithP2P = Boolean(bestGuaranteedStream && bestGuaranteedStream.seeders >= 25);
 
     const languageSummary = {
@@ -398,6 +406,7 @@ export async function getTorrentioStreams({
       recommendedServer: 'vidsrc',
       bestStream,
       streams: parsedStreams,
+      addonStatuses,
       languageSummary,
       embedServers,
       threshold: SEEDER_THRESHOLD,
@@ -412,6 +421,7 @@ export async function getTorrentioStreams({
       recommendedServer: 'vidsrc',
       bestStream: null,
       streams: [],
+      addonStatuses: [],
       languageSummary: { latino: 0, castellano: 0, vose: 0, aacGuaranteed: 0, total: 0 },
       embedServers,
       threshold: SEEDER_THRESHOLD,

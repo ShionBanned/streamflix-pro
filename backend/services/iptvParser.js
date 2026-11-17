@@ -50,6 +50,8 @@ export function normalizeCategory(rawGroup = '', channelName = '', channelUrl = 
     return 'Deportes';
   }
 
+  if (/24\s*\/?\s*7|forensic|misterios|naturaleza|wildlife|animal|cartoonito|nick jr/i.test(`${rawGroup} ${channelName}`) && !/not 24\s*\/?\s*7/i.test(channelName)) return 'Temáticos 24/7';
+
   if (/kids|infantil|anime|animation|animaci[oó]n|cartoon|nickelodeon|discovery kids|toons/i.test(`${rawGroup} ${channelName}`)) return 'Infantil y Anime';
 
   if (
@@ -198,6 +200,32 @@ export function parseM3UContent(content = '', sourceInfo = {}) {
   return channels;
 }
 
+export function groupDuplicateChannels(channels) {
+  const grouped = new Map();
+  for (const channel of channels) {
+    if (!channel?.url || !channel?.name) continue;
+    const name = channel.name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+      .replace(/\b(?:4k|2160p|1080p|720p|576p|480p|fhd|uhd|hd|sd|hevc|h265|opci[oó]n\s*\d+|opc\s*\d+)\b/gi, '')
+      .replace(/[^a-z0-9]+/g, ' ').trim();
+    const id = String(channel.id || '').replace(/@(?:HD|SD|FHD|UHD|4K|\d+p)$/i, '').toLowerCase();
+    const identity = id && !id.startsWith('ch-') ? `id:${id}` : `name:${name}`;
+    const key = `${channel.country || ''}:${channel.category || ''}:${identity}`;
+    if (!name) continue;
+    if (!grouped.has(key)) grouped.set(key, { ...channel, sources: [] });
+    const entry = grouped.get(key);
+    if (!entry.sources.some(source => source.url === channel.url)) {
+      entry.sources.push({ url: channel.url, quality: channel.quality || 'Auto', source: channel.source || 'M3U', userAgent: channel.userAgent || null, referrer: channel.referrer || null, isHevcHint: Boolean(channel.isHevcHint) });
+    }
+    if ((!entry.logo || entry.logo.includes('ui-avatars.com')) && channel.logo) entry.logo = channel.logo;
+  }
+  return [...grouped.values()].map(channel => {
+    channel.sources.sort((a, b) => Number(a.isHevcHint) - Number(b.isHevcHint));
+    channel.url = channel.sources[0].url;
+    channel.isHevcHint = channel.sources[0].isHevcHint;
+    return channel;
+  });
+}
+
 export async function fetchXtreamChannels({ server, username, password }) {
   if (!server || !username || !password) return [];
 
@@ -331,7 +359,7 @@ export async function getAggregatedChannels(options = {}) {
     finalChannels = [...customChannels, ...remainingBase];
   }
 
-  return finalChannels;
+  return groupDuplicateChannels(finalChannels);
 }
 
 /**

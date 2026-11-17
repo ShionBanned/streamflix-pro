@@ -464,3 +464,8 @@ video::cue {
 .animate-rate-love-back { animation: rateLoveBack 0.75s cubic-bezier(0.22, 1, 0.36, 1) 0.045s; }
 .animate-rate-ring { animation: rateRingPulse 0.38s ease-out 0.18s forwards; }
 .animate-rate-spark-line { animation: rateSparkLine 0.42s ease-out 0.2s forwards; }
+
+.hide-cursor,
+.hide-cursor * {
+  cursor: none !important;
+}

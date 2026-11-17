@@ -39,6 +39,8 @@ const DirectPlayer = React.lazy(() => import('./DirectPlayer.jsx'));
 const SITE_SOURCES = [
   { id: 'cuevana', name: 'Cuevana', example: 'https://cuevana3w.pro/pelicula/... o /serie/.../episodio-1x1' },
   { id: 'animeav1', name: 'AnimeAV1', example: 'https://animeav1.com/media/.../1' },
+  { id: 'pelisplus', name: 'PelisPlus', example: 'https://pelisplushd.la/pelicula/... o /serie/.../temporada/1/capitulo/1' },
+  { id: 'animeflv', name: 'AnimeFLV', example: 'https://animeflv.or.at/anime/... o /2026/11/01/...-episodio-1/' },
 ];
 const SOURCE_LANGUAGE_LABELS = { latino: 'Latino', castellano: 'Castellano', subtitulado: 'Subtitulado', doblado: 'Doblado', multi: 'Multilenguaje', vose: 'Original / VOSE', unknown: 'Sin confirmar' };
 
@@ -73,9 +75,11 @@ export default function SmartPlayer({
   const [dialogueBoostDb, setDialogueBoostDb] = useState(0);
   const [nightCompressorEnabled, setNightCompressorEnabled] = useState(false);
   const [selectedAudioTrackIdx, setSelectedAudioTrackIdx] = useState(0);
+  const [audioOffset, setAudioOffset] = useState(0);
 
   const audioCtxRef = useRef(null);
   const mediaSourceNodeRef = useRef(null);
+  const delayNodeRef = useRef(null);
   const gainNodeRef = useRef(null);
   const biquadNodeRef = useRef(null);
   const compressorNodeRef = useRef(null);
@@ -110,12 +114,12 @@ export default function SmartPlayer({
     return 'vidsrc';
   });
   const [activeMirrorIdx, setActiveMirrorIdx] = useState(0);
-  const [sitePageInputs, setSitePageInputs] = useState({ cuevana: '', animeav1: '' });
-  const [siteServers, setSiteServers] = useState({ cuevana: [], animeav1: [] });
-  const [siteTitlePages, setSiteTitlePages] = useState({ cuevana: '', animeav1: '' });
-  const [siteSearchQueries, setSiteSearchQueries] = useState({ cuevana: item?.title || item?.name || '', animeav1: item?.original_name || item?.name || item?.title || '' });
-  const [siteCandidates, setSiteCandidates] = useState({ cuevana: [], animeav1: [] });
-  const [siteLanguageFilter, setSiteLanguageFilter] = useState({ cuevana: 'all', animeav1: 'all' });
+  const [sitePageInputs, setSitePageInputs] = useState({});
+  const [siteServers, setSiteServers] = useState({});
+  const [siteTitlePages, setSiteTitlePages] = useState({});
+  const [siteSearchQueries, setSiteSearchQueries] = useState({});
+  const [siteCandidates, setSiteCandidates] = useState({});
+  const [siteLanguageFilter, setSiteLanguageFilter] = useState({});
   const [torrentLanguageFilter, setTorrentLanguageFilter] = useState('all');
   const [siteLoading, setSiteLoading] = useState({});
   const [siteErrors, setSiteErrors] = useState({});
@@ -126,12 +130,12 @@ export default function SmartPlayer({
     let saved = {}; let titles = {};
     try { saved = JSON.parse(localStorage.getItem(siteStorageKey) || '{}') || {}; } catch { saved = {}; }
     try { titles = JSON.parse(localStorage.getItem(siteTitleStorageKey) || '{}') || {}; } catch { titles = {}; }
-    const inputs = { cuevana: saved.cuevana || '', animeav1: saved.animeav1 || '' };
-    setSiteTitlePages({ cuevana: titles.cuevana || '', animeav1: titles.animeav1 || '' });
-    setSiteSearchQueries({ cuevana: item?.title || item?.name || '', animeav1: item?.original_name || item?.name || item?.title || '' });
+    const inputs = Object.fromEntries(SITE_SOURCES.map(source => [source.id, saved[source.id] || '']));
+    setSiteTitlePages(Object.fromEntries(SITE_SOURCES.map(source => [source.id, titles[source.id] || ''])));
+    setSiteSearchQueries(Object.fromEntries(SITE_SOURCES.map(source => [source.id, source.id.startsWith('anime') ? item?.original_name || item?.name || item?.title || '' : item?.title || item?.name || ''])));
     setSitePageInputs(inputs);
-    setSiteServers({ cuevana: [], animeav1: [] });
-    setSiteCandidates({ cuevana: [], animeav1: [] });
+    setSiteServers(Object.fromEntries(SITE_SOURCES.map(source => [source.id, []])));
+    setSiteCandidates(Object.fromEntries(SITE_SOURCES.map(source => [source.id, []])));
     setSiteErrors({});
     const controller = new AbortController();
     for (const source of SITE_SOURCES) {
@@ -257,14 +261,27 @@ export default function SmartPlayer({
     return () => clearTimeout(timer);
   }, [initialTime, item?.id, currentSeason, currentEpisode]);
 
-  const triggerHudVisibility = useCallback(() => setShowHud(true), []);
+  const activeDrawerRef = useRef(activeDrawer);
+  activeDrawerRef.current = activeDrawer;
+
+  const triggerHudVisibility = useCallback(() => {
+    setShowHud(true);
+    if (hudTimeoutRef.current) {
+      clearTimeout(hudTimeoutRef.current);
+    }
+    if (activeDrawerRef.current) return;
+
+    hudTimeoutRef.current = setTimeout(() => {
+      setShowHud(false);
+    }, 3000);
+  }, []);
 
   useEffect(() => {
     triggerHudVisibility();
     return () => {
       if (hudTimeoutRef.current) clearTimeout(hudTimeoutRef.current);
     };
-  }, [triggerHudVisibility]);
+  }, [triggerHudVisibility, activeDrawer]);
 
   // Cadena de Audio DSP WebAudio API (GainNode + BiquadFilterNode 2.6 kHz + DynamicsCompressorNode)
   const ensureWebAudioChain = useCallback(() => {
@@ -299,6 +316,9 @@ export default function SmartPlayer({
         biquad.Q.value = 1.15;
         biquad.gain.value = dialogueBoostDb;
 
+        const delay = ctx.createDelay(5.0);
+        delay.delayTime.value = Math.max(0, audioOffset);
+
         const compressor = ctx.createDynamicsCompressor();
         compressor.threshold.value = nightCompressorEnabled ? -24 : 0;
         compressor.knee.value = 30;
@@ -309,17 +329,22 @@ export default function SmartPlayer({
         const gain = ctx.createGain();
         gain.gain.value = audioGainPercent / 100;
 
-        source.connect(biquad);
+        source.connect(delay);
+        delay.connect(biquad);
         biquad.connect(compressor);
         compressor.connect(gain);
         gain.connect(ctx.destination);
 
         mediaSourceNodeRef.current = source;
+        delayNodeRef.current = delay;
         biquadNodeRef.current = biquad;
         compressorNodeRef.current = compressor;
         gainNodeRef.current = gain;
         connectedVideoElRef.current = videoEl;
       } else {
+        if (delayNodeRef.current) {
+          delayNodeRef.current.delayTime.value = Math.max(0, audioOffset);
+        }
         if (biquadNodeRef.current) {
           biquadNodeRef.current.gain.value = dialogueBoostDb;
         }
@@ -334,9 +359,12 @@ export default function SmartPlayer({
     } catch {
       // Continuar reproducción normal
     }
-  }, [audioGainPercent, dialogueBoostDb, nightCompressorEnabled]);
+  }, [audioGainPercent, dialogueBoostDb, nightCompressorEnabled, audioOffset]);
 
   useEffect(() => {
+    if (delayNodeRef.current) {
+      delayNodeRef.current.delayTime.value = Math.max(0, audioOffset);
+    }
     if (biquadNodeRef.current) {
       biquadNodeRef.current.gain.value = dialogueBoostDb;
     }
@@ -347,7 +375,25 @@ export default function SmartPlayer({
     if (gainNodeRef.current) {
       gainNodeRef.current.gain.value = audioGainPercent / 100;
     }
-  }, [audioGainPercent, dialogueBoostDb, nightCompressorEnabled]);
+  }, [audioGainPercent, dialogueBoostDb, nightCompressorEnabled, audioOffset]);
+
+  const updateAudioOffset = useCallback((val) => {
+    const clamped = Math.max(-5, Math.min(5, Math.round(val * 100) / 100));
+    setAudioOffset(clamped);
+    if (delayNodeRef.current) {
+      delayNodeRef.current.delayTime.value = Math.max(0, clamped);
+    }
+  }, []);
+
+  const adjustAudioOffset = useCallback((delta) => {
+    setAudioOffset((prev) => {
+      const next = Math.max(-5, Math.min(5, Math.round((prev + delta) * 100) / 100));
+      if (delayNodeRef.current) {
+        delayNodeRef.current.delayTime.value = Math.max(0, next);
+      }
+      return next;
+    });
+  }, []);
 
   // Seleccionar pista de audio nativa HTML5 si el archivo contiene múltiples pistas
   const syncNativeVideoAudioTrack = useCallback((langId, trackIdx) => {
@@ -418,6 +464,44 @@ export default function SmartPlayer({
       if (matchingStream && matchingStream.infoHash !== selectedP2PStream?.infoHash) {
         setSelectedP2PStream(matchingStream);
       }
+
+      if (torrentStatus?.audioTracks?.length > 0) {
+        const tracks = torrentStatus.audioTracks;
+        let matchedTrack = null;
+        if (targetLang === 'latino' || targetLang === 'castellano' || presetId.includes('latino') || presetId.includes('castellano')) {
+          matchedTrack = tracks.find(t => {
+            const l = (t.lang || '').toLowerCase();
+            const lbl = (t.label || '').toLowerCase();
+            const tit = (t.title || '').toLowerCase();
+            if (targetLang === 'castellano') {
+              return l === 'es-es' || lbl.includes('castellano') || tit.includes('castellano');
+            }
+            return ['es-mx', 'es-la', 'spa', 'es'].includes(l) || lbl.includes('latino') || tit.includes('latino') || lbl.includes('español');
+          }) || tracks.find(t => {
+            const l = (t.lang || '').toLowerCase();
+            const lbl = (t.label || '').toLowerCase();
+            return ['spa', 'es', 'es-mx', 'es-la', 'es-es'].includes(l) || lbl.includes('español') || lbl.includes('castellano');
+          });
+        } else if (targetLang === 'en' || presetId.includes('en')) {
+          matchedTrack = tracks.find(t => {
+            const l = (t.lang || '').toLowerCase();
+            const lbl = (t.label || '').toLowerCase();
+            const tit = (t.title || '').toLowerCase();
+            return ['eng', 'en'].includes(l) || lbl.includes('inglés') || lbl.includes('english') || tit.includes('english');
+          });
+        }
+
+        if (matchedTrack) {
+          const curTime = Math.max(0, trackedTimeRef.current || videoRef.current?.currentTime || 0);
+          audioTrackManualRef.current = true;
+          setSelectedAudioTrackIdx(matchedTrack.index);
+          if (matchedTrack.index !== 0) {
+            setTranscodeStart(curTime);
+            setForceTranscode(true);
+          }
+        }
+      }
+
       syncNativeVideoAudioTrack(targetLang, selectedAudioTrackIdx);
     }
 
@@ -473,16 +557,16 @@ export default function SmartPlayer({
           setResolutionData(data);
 
           let preferredStream = null;
-          if (data.streams?.length > 0) {
+          if (data.streams?.some(s => s.infoHash)) {
             preferredStream =
               data.streams.find(
                 (s) =>
+                  s.infoHash &&
                   (s.languageCode === selectedLanguage || s.languageCode === 'multi') &&
                   (s.audioGuaranteed || s.browserNative)
               ) ||
-              data.streams.find((s) => s.audioGuaranteed || s.browserNative) ||
-              data.bestStream ||
-              data.streams[0];
+              data.streams.find((s) => s.infoHash && (s.audioGuaranteed || s.browserNative)) ||
+              data.streams.find(s => s.infoHash);
             setSelectedP2PStream(preferredStream);
           }
 
@@ -760,6 +844,10 @@ export default function SmartPlayer({
       if (e.key === 'Escape') {
         if (activeDrawer) {
           setActiveDrawer(null);
+        } else if (document.fullscreenElement) {
+          if (document.exitFullscreen) {
+            document.exitFullscreen().catch(() => {});
+          }
         } else {
           handleSafeClose();
         }
@@ -987,7 +1075,7 @@ export default function SmartPlayer({
     return () => clearInterval(nextTimerRef.current);
   }, [showNextPrompt, onPlayNextEpisode, item, currentSeason, currentEpisode, selectedLanguage]);
 
-  const getP2PRelativeUrl = () => {
+  const getP2PRelativeUrl = (forExternal = false) => {
     if (!selectedP2PStream?.infoHash) return '';
     const qs = new URLSearchParams();
     if (selectedP2PStream.fileIdx !== null && selectedP2PStream.fileIdx !== undefined) {
@@ -1001,17 +1089,23 @@ export default function SmartPlayer({
     qs.set('audioTrack', String(selectedAudioTrackIdx));
     qs.set('manualAudio', audioTrackManualRef.current ? '1' : '0');
     qs.set('originalLanguage', originalLanguage || '');
-    if (forceTranscode) {
+    const needsTranscode = forceTranscode || selectedAudioTrackIdx > 0 || audioTrackManualRef.current;
+    if (needsTranscode) {
       qs.set('audioEngine', 'aac');
       qs.set('transcode', '1');
       qs.set('startTime', String(transcodeStart));
+    }
+    // Para el navegador web, el retraso positivo (> 0) se aplica en tiempo real vía WebAudio DelayNode sin recargar.
+    // Solo enviamos audioOffset al backend si es negativo (atrim) o si es para un reproductor externo (VLC/MPV).
+    if ((forExternal && audioOffset) || audioOffset < 0) {
+      qs.set('audioOffset', String(audioOffset));
     }
     const query = qs.toString();
     return `/api/stream/${selectedP2PStream.infoHash}${query ? `?${query}` : ''}`;
   };
 
   const getAbsoluteStreamUrl = () => {
-    const rel = getP2PRelativeUrl();
+    const rel = getP2PRelativeUrl(true);
     if (!rel) return '';
     return `http://localhost:4000${rel}`;
   };
@@ -1071,6 +1165,7 @@ export default function SmartPlayer({
   const togglePlay = () => {
     if (!videoRef.current) return;
     ensureWebAudioChain();
+    triggerHudVisibility();
     if (videoRef.current.paused) {
       videoRef.current.play().catch(() => {});
       setIsPlaying(true);
@@ -1202,6 +1297,16 @@ export default function SmartPlayer({
     setEmbedChoice({ url: '', mode: '' });
     setActiveServer(serverId); setActiveMirrorIdx(index);
   };
+  const playSiteVersion = (source, data, server) => {
+    if (!data?.servers || !server) return;
+    const playable = data.servers.filter(entry => !entry.pageOnly);
+    const index = playable.findIndex(entry => entry.url === server.url);
+    if (index < 0) return;
+    setSiteServers(current => ({ ...current, [source]: data.servers }));
+    setSitePageInputs(current => ({ ...current, [source]: data.pageUrl }));
+    setSiteTitlePages(current => ({ ...current, [source]: data.titleUrl }));
+    switchCloud(source, index);
+  };
   const selectSiteTitle = async (source, candidate) => {
     setSiteLoading(current => ({ ...current, [source]: true }));
     setSiteErrors(current => ({ ...current, [source]: '' }));
@@ -1229,7 +1334,7 @@ export default function SmartPlayer({
       const candidates = data.candidates || [];
       setSiteCandidates(current => ({ ...current, [source]: candidates }));
       if (!candidates.length) setSiteErrors(current => ({ ...current, [source]: 'No hubo coincidencias. Prueba con otro nombre o usa el enlace manual.' }));
-      else if (candidates[0].score === 1 && (source === 'animeav1' || candidates[0].type === mediaType) && (candidates.length === 1 || candidates[1].score < 1)) {
+      else if (candidates[0].score === 1 && (source.startsWith('anime') || candidates[0].type === mediaType) && (candidates.length === 1 || candidates[1].score < 1)) {
         await selectSiteTitle(source, candidates[0]);
       }
     } catch (error) {
@@ -1274,6 +1379,14 @@ export default function SmartPlayer({
   const openDirectSource = () => {
     try { const url = new URL(directInput.trim()); if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) throw new Error(); setDirectUrl(url.href); setActiveServer('direct'); setActiveDrawer(null); const next = [url.href, ...savedDirectSources.filter(value => value !== url.href)].slice(0, 20); localStorage.setItem(directStorageKey, JSON.stringify(next)); setSavedDirectSources(next); }
     catch { setLaunchMessage({ type: 'error', text: 'Introduce la URL HTTP/HTTPS de un archivo HLS, MP4 o WebM disponible para ti.' }); }
+  };
+  const saveDirectOffline = async () => {
+    try {
+      await api.startDownload(directInput.trim(), title);
+      setLaunchMessage({ type: 'success', text: 'Descarga iniciada. Sigue el progreso en Offline.' });
+    } catch (error) {
+      setLaunchMessage({ type: 'error', text: error.response?.data?.error || error.message || 'No se pudo iniciar la descarga.' });
+    }
   };
   const tryNextCloud = () => {
     const next = nextCloudMirror(embedServersList, activeServer, activeMirrorIdx, attemptedCloudRef.current, cloudHealth);
@@ -1352,9 +1465,12 @@ export default function SmartPlayer({
       onMouseMove={triggerHudVisibility}
       onTouchStart={triggerHudVisibility}
       onClick={() => {
+        triggerHudVisibility();
         if (activeDrawer) setActiveDrawer(null);
       }}
-      className="fixed inset-0 z-50 bg-[#080808] overflow-hidden select-none font-netflix animate-playerReveal"
+      className={`fixed inset-0 z-50 bg-[#080808] overflow-hidden select-none font-netflix animate-playerReveal transition-all duration-200 ${
+        !showHud && !activeDrawer ? 'hide-cursor cursor-none [&_*]:!cursor-none' : ''
+      }`}
     >
       <div
         onMouseEnter={triggerHudVisibility}
@@ -1589,7 +1705,7 @@ export default function SmartPlayer({
                     </button>
                   </div>
 
-                  {(torrentStatus?.audioTracks || []).length > 0 && (
+                  {(torrentStatus?.audioTracks || []).length > 0 ? (
                     <div className="space-y-1.5">
                       <span className="text-[11px] font-semibold text-neutral-400 block">Pistas del archivo</span>
                       <div className="flex flex-wrap gap-1.5">
@@ -1597,9 +1713,16 @@ export default function SmartPlayer({
                           <button
                             key={tIdx}
                             onClick={() => {
+                              const curTime = Math.max(0, trackedTimeRef.current || videoRef.current?.currentTime || 0);
                               audioTrackManualRef.current = true;
                               setSelectedAudioTrackIdx(tIdx);
-                              syncNativeVideoAudioTrack(selectedLanguage, tIdx);
+                              setTranscodeStart(curTime);
+                              setForceTranscode(true);
+                              setLaunchMessage({
+                                type: 'info',
+                                text: `Cambiando a pista de audio: ${track.label}`,
+                              });
+                              setTimeout(() => setLaunchMessage(null), 3500);
                             }}
                             className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition ${
                               selectedAudioTrackIdx === tIdx
@@ -1612,7 +1735,70 @@ export default function SmartPlayer({
                         ))}
                       </div>
                     </div>
-                  )}
+                  ) : torrentStatus?.hasFfmpeg ? (
+                    <div className="flex items-center gap-2 p-2.5 rounded-lg bg-white/[0.03] border border-white/10 text-[11px] text-neutral-400">
+                      <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse shrink-0" />
+                      <span>Detectando pistas de audio disponibles...</span>
+                    </div>
+                  ) : null}
+
+                  <div className="space-y-2 pt-3 border-t border-white/10">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="text-xs font-bold text-white block">Sincronización de audio</span>
+                        <span className="text-[10px] text-neutral-400">Corrige si la voz va antes o después de la imagen</span>
+                      </div>
+                      <span className={`text-xs font-mono font-bold ${audioOffset > 0 ? 'text-amber-400' : audioOffset < 0 ? 'text-sky-400' : 'text-neutral-400'}`}>
+                        {audioOffset > 0 ? `+${audioOffset.toFixed(2)}s` : `${audioOffset.toFixed(2)}s`}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => adjustAudioOffset(-0.5)}
+                        className="flex-1 py-1 px-1.5 bg-white/5 hover:bg-white/10 text-white rounded text-[11px] font-mono font-bold border border-white/10 transition"
+                        title="Adelantar voz 0.5s"
+                      >
+                        -0.5s
+                      </button>
+                      <button
+                        onClick={() => adjustAudioOffset(-0.1)}
+                        className="flex-1 py-1 px-1.5 bg-white/5 hover:bg-white/10 text-white rounded text-[11px] font-mono font-bold border border-white/10 transition"
+                        title="Adelantar voz 0.1s"
+                      >
+                        -0.1s
+                      </button>
+                      <button
+                        onClick={() => updateAudioOffset(0)}
+                        className="px-2.5 py-1 bg-white/10 hover:bg-white/15 text-white rounded text-[11px] font-bold border border-white/15 transition"
+                        title="Restablecer a 0s"
+                      >
+                        0s
+                      </button>
+                      <button
+                        onClick={() => adjustAudioOffset(0.1)}
+                        className="flex-1 py-1 px-1.5 bg-white/5 hover:bg-white/10 text-white rounded text-[11px] font-mono font-bold border border-white/10 transition"
+                        title="Retrasar voz 0.1s"
+                      >
+                        +0.1s
+                      </button>
+                      <button
+                        onClick={() => adjustAudioOffset(0.5)}
+                        className="flex-1 py-1 px-1.5 bg-white/5 hover:bg-white/10 text-white rounded text-[11px] font-mono font-bold border border-white/10 transition"
+                        title="Retrasar voz 0.5s"
+                      >
+                        +0.5s
+                      </button>
+                    </div>
+                    <input
+                      type="range"
+                      min="-3"
+                      max="3"
+                      step="0.05"
+                      value={audioOffset}
+                      onChange={(e) => updateAudioOffset(parseFloat(e.target.value))}
+                      className="w-full accent-[#E50914] bg-neutral-700 h-1.5 rounded-lg cursor-pointer"
+                    />
+                  </div>
                 </div>
               )}
             </>
@@ -1690,6 +1876,11 @@ export default function SmartPlayer({
                   videoRef={videoRef}
                   videoKey={`${selectedP2PStream.infoHash}-${selectedP2PStream.fileIdx ?? 0}-${forceTranscode}-${selectedAudioTrackIdx}`}
                   sourcePages={sitePageInputs}
+                  title={item?.title || item?.name || ''}
+                  mediaType={mediaType}
+                  season={currentSeason}
+                  episode={currentEpisode}
+                  onPlaySiteServer={playSiteVersion}
                 />
               </div>
             ) : activeServer === 'direct' ? (
@@ -1697,7 +1888,7 @@ export default function SmartPlayer({
             ) : (
               <div className="space-y-3">
                 <p className="text-[11px] text-amber-200 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2">Conserva el video Cloud en 4K. Carga una pista de audio directa y silencia el audio inglés dentro del reproductor Cloud. {activeServer === 'vidsrc' && currentEmbedServerObj?.mirrors?.[activeMirrorIdx]?.id === 'sh' ? 'En VidSrc.sh también solicitamos el silencio automáticamente.' : 'Este servidor no permite silenciarlo desde StreamFlix.'}</p>
-                <ExternalAudio videoRef={null} videoKey={currentEmbedUrl} sourcePages={sitePageInputs} cloudClock={cloudClock} onActiveChange={setCloudAudioActive} />
+                <ExternalAudio videoRef={null} videoKey={currentEmbedUrl} sourcePages={sitePageInputs} cloudClock={cloudClock} onActiveChange={setCloudAudioActive} title={item?.title || item?.name || ''} mediaType={mediaType} season={currentSeason} episode={currentEpisode} onPlaySiteServer={playSiteVersion} />
               </div>
             )}
           </div>
@@ -1858,13 +2049,21 @@ export default function SmartPlayer({
 
                 {resolutionData?.streams?.length > 0 ? (
                   <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">
-                    {visibleTorrentStreams.slice(0, 20).map((s, idx) => {
+                    {visibleTorrentStreams.slice(0, 30).map((s, idx) => {
                       const isCurrentP2P =
-                        activeServer === 'p2p' && selectedP2PStream?.infoHash === s.infoHash;
+                        activeServer === 'p2p' && s.infoHash && selectedP2PStream?.infoHash === s.infoHash;
+                      const isCurrentDirect = activeServer === 'direct' && s.url && directUrl === s.url;
                       return (
                         <button
-                          key={`${s.infoHash}-${idx}`}
+                          key={`${s.infoHash || s.url}-${idx}`}
                           onClick={() => {
+                            if (s.url) {
+                              setDirectUrl(s.url);
+                              setActiveServer('direct');
+                              setActiveDrawer(null);
+                              setVideoError(false);
+                              return;
+                            }
                             setSelectedP2PStream(s);
                             setForceTranscode(false);
                             hasSeekedVideoRef.current = false;
@@ -1873,7 +2072,7 @@ export default function SmartPlayer({
                             setActiveDrawer(null);
                           }}
                           className={`w-full text-left p-2.5 rounded-xl text-xs transition flex items-center justify-between gap-2 border ${
-                            isCurrentP2P
+                            isCurrentP2P || isCurrentDirect
                               ? 'bg-[#E50914]/20 border-[#E50914] text-white'
                               : 'bg-white/[0.04] hover:bg-white/[0.08] border-white/10 text-neutral-200'
                           }`}
@@ -1883,14 +2082,15 @@ export default function SmartPlayer({
                               <span>{s.resolution}</span>
                               <span>•</span>
                               <span className="text-sky-400">{s.language}</span>
+                              <span className="text-amber-300">{s.source === 'yts' ? 'YTS' : s.source === 'torrentio' ? 'Torrentio' : s.source || 'Add-on'}</span>
                               <span className="px-1.5 py-0.2 bg-white/10 text-[10px] rounded font-semibold">
-                                {s.audioGuaranteed || s.browserNative ? 'Listo para navegador' : 'MKV Multi-Audio'}
+                                {s.url ? 'Enlace HTTPS del add-on' : s.audioGuaranteed || s.browserNative ? 'Listo para navegador' : 'MKV Multi-Audio'}
                               </span>
                             </div>
                             <p className="text-[10px] text-neutral-400 truncate mt-0.5">{s.cleanTitle}</p>
                           </div>
                           <span className="text-[11px] text-emerald-400 font-mono font-bold shrink-0">
-                            {s.seeders} 👤
+                            {s.url ? 'HTTP' : `${s.seeders} 👤`}
                           </span>
                         </button>
                       );
@@ -1902,6 +2102,12 @@ export default function SmartPlayer({
                       ? 'Buscando fuentes Torrent / YTS en segundo plano…'
                       : 'No hay fuentes P2P disponibles para este título.'}
                   </p>
+                )}
+                {(resolutionData?.addonStatuses || []).length > 0 && (
+                  <div className="text-[10px] text-neutral-400 leading-relaxed space-y-1">
+                    {resolutionData.addonStatuses.map(source => <p key={source.id}>{source.name}: {source.state === 'available' ? `${source.count} fuente(s)` : source.state === 'empty' ? 'sin resultados' : source.state === 'not-configured' ? 'requiere manifiesto configurado' : source.state === 'invalid-manifest' ? 'manifiesto incompatible o desactualizado' : `no disponible${source.reason ? ` (${source.reason})` : ''}`} {source.state !== 'available' && source.setupUrl && <a href={source.setupUrl} target="_blank" rel="noopener noreferrer" className="text-emerald-300 underline">Configurar</a>}</p>)}
+                    <p>Pega la URL completa del manifiesto en backend/.env con la variable del add-on y reinicia el backend.</p>
+                  </div>
                 )}
 
                 {selectedP2PStream && (
@@ -1973,7 +2179,7 @@ export default function SmartPlayer({
                               {siteCandidates[source.id].map((candidate) => (
                                 <button key={candidate.titleUrl} type="button" onClick={() => selectSiteTitle(source.id, candidate)} className="w-full rounded-lg border border-white/10 bg-black/45 hover:bg-white/10 px-2.5 py-2 text-left">
                                   <span className="block text-xs font-semibold text-white truncate">{candidate.title}</span>
-                                  <span className="text-[10px] text-neutral-400">{candidate.type === 'movie' ? 'Película' : 'Serie'}{candidate.year ? ` · ${candidate.year}` : ''}</span>
+                                  <span className="text-[10px] text-neutral-400">{candidate.type === 'movie' ? 'Película' : candidate.type === 'anime' ? 'Anime' : 'Serie'}{candidate.year ? ` · ${candidate.year}` : ''}</span>
                                 </button>
                               ))}
                             </div>
@@ -1988,7 +2194,7 @@ export default function SmartPlayer({
                           {visibleServers.map((server) => (
                             <button key={server.id} type="button" onClick={() => { if (server.pageOnly) { if (sitePageInputs[source.id]) window.open(sitePageInputs[source.id], '_blank', 'noopener,noreferrer'); } else switchCloud(source.id, servers.filter(entry => !entry.pageOnly).indexOf(server)); }} className={`w-full p-2 rounded-lg border text-left ${activeServer === source.id && activeMirrorIdx === servers.filter(entry => !entry.pageOnly).indexOf(server) && !server.pageOnly ? 'bg-[#E50914]/20 border-[#E50914]' : 'bg-black/45 border-white/10 hover:bg-white/10'}`}>
                               <span className="text-xs font-bold text-white block">{server.name}</span>
-                              <span className="text-[10px] text-neutral-400">{server.audioLabel}{server.pageOnly ? ' · Abrir en AnimeAV1 (requiere su página)' : ''}</span>
+                              <span className="text-[10px] text-neutral-400">{server.audioLabel}{server.pageOnly ? ` · Abrir en ${source.name} (requiere su página)` : ''}</span>
                             </button>
                           ))}
                         </div>
@@ -2015,6 +2221,14 @@ export default function SmartPlayer({
                   >
                     Reproducir enlace directo
                   </button>
+                  <button
+                    onClick={saveDirectOffline}
+                    disabled={!directInput.trim()}
+                    className="w-full py-2 text-xs font-bold rounded-lg bg-white/10 hover:bg-white/20 text-white disabled:opacity-50 transition"
+                  >
+                    Guardar offline compacto (MP4/WebM)
+                  </button>
+                  <p className="text-[10px] text-neutral-400">Solo archivos directos HTTPS disponibles para descarga; no funciona con HLS, páginas externas ni canales premium.</p>
                 </div>
               </div>
             )}
@@ -2202,7 +2416,7 @@ export default function SmartPlayer({
               offset={subtitleOffset}
               rate={subtitleRate}
               transcodeOffset={forceTranscode ? transcodeStart : 0}
-              hudVisible={showHud || !isPlaying}
+              hudVisible={showHud || Boolean(activeDrawer)}
               size={subtitleSize}
               position={subtitlePosition}
               backdrop={subtitleBackdrop}
@@ -2280,7 +2494,7 @@ export default function SmartPlayer({
             <div
               onClick={(e) => e.stopPropagation()}
               className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black via-black/90 to-transparent px-4 sm:px-8 pb-5 pt-10 space-y-3 z-30 transition-all duration-300 ${
-                showHud || !isPlaying
+                showHud || Boolean(activeDrawer)
                   ? 'opacity-100 translate-y-0'
                   : 'opacity-0 translate-y-4 pointer-events-none'
               }`}

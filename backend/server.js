@@ -1,5 +1,6 @@
 import { checkCloudHealth } from './services/cloudHealth.js';
 import { getSiteServers, getResolvedSiteServers, searchSiteTitles } from './services/siteServers.js';
+import { getExtraSiteServers, resolveExtraSite, searchExtraSite } from './services/extraSiteServers.js';
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
@@ -8,10 +9,12 @@ import tmdbService from './services/tmdbService.js';
 import torrentio from './services/torrentio.js';
 import streamEngine from './services/streamEngine.js';
 import iptvService from './services/iptvParser.js';
+import { channelHealth } from './services/channelHealth.js';
 import subtitleService from './services/subtitleService.js';
 import { extractSubtitleVtt } from './services/mediaTools.js';
 import externalPlayer from './services/externalPlayer.js';
 import fs from 'node:fs';
+import { initDownloads, listDownloads, getDownload, startDownload, deleteDownload, downloadFile, parseDownloadRange } from './services/downloadService.js';
 import { aiAvailable, getAiJob, getAiVtt, publicAiJob, receiveUpload, startP2pJob, startUploadJob } from './services/aiSubtitles.js';
 
 dotenv.config();
@@ -22,13 +25,40 @@ const PORT = process.env.PORT || 4000;
 app.use(
   cors({
     origin: (origin, callback) => callback(null, !origin || /^http:\/\/(?:localhost|127\.0\.0\.1):(?:4000|5173)$/.test(origin)),
-    methods: ['GET', 'POST', 'OPTIONS'],
+    methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Range', 'Authorization'],
     exposedHeaders: ['Content-Range', 'Accept-Ranges', 'Content-Length', 'Content-Type'],
   })
 );
 
 app.use(express.json());
+
+await initDownloads();
+const localMutation = (req, res, next) => {
+  if (req.headers.origin && !/^http:\/\/(?:localhost|127\.0\.0\.1):(?:4000|5173)$/.test(req.headers.origin)) return res.status(403).json({ error: 'Origen no permitido.' });
+  next();
+};
+app.get('/api/downloads', (_req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json({ items: listDownloads() }); });
+app.post('/api/downloads', localMutation, async (req, res) => {
+  try { res.status(202).json(await startDownload(req.body || {})); }
+  catch (error) { res.status(400).json({ error: error.message }); }
+});
+app.delete('/api/downloads/:id', localMutation, async (req, res) => {
+  try { if (!await deleteDownload(req.params.id)) return res.status(404).json({ error: 'Descarga no encontrada.' }); res.status(204).end(); }
+  catch (error) { res.status(409).json({ error: error.message }); }
+});
+app.get('/api/downloads/:id/stream', (req, res) => {
+  const item = getDownload(req.params.id);
+  if (!item || item.status !== 'complete') return res.status(404).json({ error: 'Archivo offline no disponible.' });
+  const file = downloadFile(item);
+  let size;
+  try { size = fs.statSync(file).size; } catch { return res.status(404).json({ error: 'Archivo offline no encontrado.' }); }
+  const range = parseDownloadRange(req.headers.range, size);
+  if (!range) return res.status(416).set('Content-Range', `bytes */${size}`).end();
+  res.set({ 'Content-Type': item.format === 'webm' ? 'video/webm' : 'video/mp4', 'Accept-Ranges': 'bytes', 'Content-Length': range.end - range.start + 1, 'Cache-Control': 'private, no-store' });
+  if (range.partial) res.status(206).set('Content-Range', `bytes ${range.start}-${range.end}/${size}`);
+  fs.createReadStream(file, { start: range.start, end: range.end }).on('error', () => res.destroy()).pipe(res);
+});
 
 app.get('/api/ai/status', (_req, res) => res.json({ available: aiAvailable(), engine: 'Whisper local', privacy: 'El audio se procesa en este equipo.' }));
 app.post('/api/ai/subtitles/p2p', async (req, res) => {
@@ -271,7 +301,7 @@ app.get('/api/cloud/health', async (req, res) => {
 app.get('/api/site-servers', async (req, res) => {
   try {
     res.setHeader('Cache-Control', 'no-store');
-    res.json(await getSiteServers(req.query.source, req.query.url));
+    res.json(await (['pelisplus', 'animeflv'].includes(req.query.source) ? getExtraSiteServers(req.query.source, req.query.url) : getSiteServers(req.query.source, req.query.url)));
   } catch (error) {
     const invalid = /URL|enlace|Fuente|página del título|debe ser/.test(error.message);
     res.status(invalid ? 400 : 502).json({ error: error.message });
@@ -281,7 +311,7 @@ app.get('/api/site-servers', async (req, res) => {
 app.get('/api/site-search', async (req, res) => {
   try {
     res.setHeader('Cache-Control', 'no-store');
-    res.json(await searchSiteTitles(req.query.source, req.query.title));
+    res.json(await (['pelisplus', 'animeflv'].includes(req.query.source) ? searchExtraSite(req.query.source, req.query.title) : searchSiteTitles(req.query.source, req.query.title)));
   } catch (error) {
     res.status(/título|Fuente|enlace/.test(error.message) ? 400 : 502).json({ error: error.message });
   }
@@ -290,7 +320,7 @@ app.get('/api/site-search', async (req, res) => {
 app.get('/api/site-resolve', async (req, res) => {
   try {
     res.setHeader('Cache-Control', 'no-store');
-    res.json(await getResolvedSiteServers(req.query.source, req.query.titleUrl, req.query.season || 1, req.query.episode || 1));
+    res.json(await (['pelisplus', 'animeflv'].includes(req.query.source) ? resolveExtraSite(req.query.source, req.query.titleUrl, req.query.season || 1, req.query.episode || 1) : getResolvedSiteServers(req.query.source, req.query.titleUrl, req.query.season || 1, req.query.episode || 1)));
   } catch (error) {
     res.status(/URL|enlace|Fuente|inválido|no pertenece|no aparece|temporadas/.test(error.message) ? 400 : 502).json({ error: error.message });
   }
@@ -371,6 +401,15 @@ app.get('/api/stream/:infoHash/subtitle/:trackIndex', async (req, res) => {
   }
 });
 
+app.post('/api/stream/prewarm', (req, res) => {
+  const { infoHash } = req.body;
+  if (infoHash && /^[0-9a-f]{40}$/i.test(String(infoHash))) {
+    streamEngine.getOrAddTorrent(infoHash).catch(() => {});
+    return res.json({ success: true, message: 'Enjambre precalentado' });
+  }
+  res.status(400).json({ error: 'infoHash inválido' });
+});
+
 app.post('/api/stream/close', (req, res) => {
   const { infoHash } = req.body;
   if (infoHash) {
@@ -439,6 +478,7 @@ app.get('/api/iptv/channels', async (req, res) => {
       server,
       username,
       password,
+      includeHidden = 'false',
     } = req.query;
 
     const parsedCustomUrls = [];
@@ -475,6 +515,7 @@ app.get('/api/iptv/channels', async (req, res) => {
     const categories = [
       'Todos',
       'Pluto TV 24/7',
+      'Temáticos 24/7',
       'Deportes',
       'Películas y Series',
       'Noticias',
@@ -487,11 +528,14 @@ app.get('/api/iptv/channels', async (req, res) => {
       'Entretenimiento',
     ];
 
+    const health = channelHealth.decorate(channels, { includeHidden: includeHidden === 'true' });
+    res.setHeader('Cache-Control', 'no-store');
     res.json({
-      total: channels.length,
+      total: health.channels.length,
+      hiddenCount: health.hiddenCount,
       categories,
       sources: iptvService.DEFAULT_M3U_SOURCES,
-      channels,
+      channels: health.channels,
     });
   } catch (err) {
     res.status(500).json({ error: 'Error obteniendo canales IPTV', message: err.message });
@@ -506,13 +550,20 @@ app.post('/api/iptv/custom', async (req, res) => {
       customUrls,
       xtream,
     });
-    res.json({
-      total: channels.length,
-      channels,
-    });
+    const health = channelHealth.decorate(channels, { includeHidden: true });
+    res.json({ total: health.channels.length, hiddenCount: health.hiddenCount, channels: health.channels });
   } catch (err) {
     res.status(500).json({ error: 'Error procesando listas personalizadas', message: err.message });
   }
+});
+
+app.post('/api/iptv/health', (req, res) => {
+  if (req.headers.origin && !/^http:\/\/(?:localhost|127\.0\.0\.1):(?:4000|5173)$/.test(req.headers.origin)) return res.status(403).json({ error: 'Origen no permitido.' });
+  try {
+    const { sourceId, outcome } = req.body || {};
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(channelHealth.report(sourceId, outcome));
+  } catch (error) { res.status(400).json({ error: error.message }); }
 });
 
 app.get('/api/iptv/countries', (req, res) => {

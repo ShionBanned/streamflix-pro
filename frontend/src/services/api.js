@@ -72,6 +72,21 @@ function blendPassiveItems(primary = [], secondary = []) {
 }
 
 export const api = {
+  async getDownloads() {
+    const res = await apiClient.get('/downloads');
+    return res.data.items || [];
+  },
+
+  async startDownload(source, title, quality = 'compact') {
+    const payload = typeof source === 'string' ? { url: source, title, quality } : { ...source, title, quality };
+    const res = await apiClient.post('/downloads', payload);
+    return res.data;
+  },
+
+  async deleteDownload(id) {
+    await apiClient.delete(`/downloads/${id}`);
+  },
+
   async getTrending(type = 'all', page = 1, lang = 'es-MX') {
     try {
       const data = await cachedGet('/tmdb/trending', { type, page, lang });
@@ -463,11 +478,12 @@ export const api = {
     return res.data?.subtitles || [];
   },
 
-  async getIptvChannels({ country, category, refresh = false, customUrls = [], xtream = null } = {}) {
+  async getIptvChannels({ country, category, refresh = false, includeHidden = false, customUrls = [], xtream = null } = {}) {
     const params = {};
     if (country) params.country = country;
     if (category) params.category = category;
     if (refresh) params.refresh = 'true';
+    if (includeHidden) params.includeHidden = 'true';
     if (customUrls.length > 0) params.customUrls = JSON.stringify(customUrls);
     if (xtream?.server) {
       params.server = xtream.server;
@@ -476,6 +492,11 @@ export const api = {
     }
 
     const res = await apiClient.get('/iptv/channels', { params });
+    return res.data;
+  },
+
+  async reportIptvHealth(sourceId, outcome) {
+    const res = await apiClient.post('/iptv/health', { sourceId, outcome });
     return res.data;
   },
 

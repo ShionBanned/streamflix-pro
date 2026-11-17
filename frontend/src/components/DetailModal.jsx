@@ -15,6 +15,7 @@ import {
   ChevronUp,
   RotateCcw,
   Layers,
+  Download,
 } from 'lucide-react';
 import { LANGUAGE_OPTIONS } from '../hooks/useUserMedia.js';
 import { getContentRating } from '../utils/contentRating.js';
@@ -55,6 +56,16 @@ export default function DetailModal({
   const [userReaction, setUserReaction] = useState(null); // 'dislike' | 'like' | 'love' | null
   const [rateMenuOpen, setRateMenuOpen] = useState(false);
   const [rateAnim, setRateAnim] = useState(null);
+  const [downloadOpen, setDownloadOpen] = useState(false);
+  const [downloadSources, setDownloadSources] = useState([]);
+  const [downloadLoading, setDownloadLoading] = useState(false);
+  const [downloadBusy, setDownloadBusy] = useState(false);
+  const [downloadError, setDownloadError] = useState('');
+  const [downloadSuccess, setDownloadSuccess] = useState('');
+  const [downloadIndex, setDownloadIndex] = useState(0);
+  const [downloadUrl, setDownloadUrl] = useState('');
+  const [downloadQuality, setDownloadQuality] = useState('compact');
+  const [downloadEpisode, setDownloadEpisode] = useState(1);
   const rateCloseTimerRef = useRef(null);
 
   const trailerFrameRef = useRef(null);
@@ -258,6 +269,34 @@ export default function DetailModal({
     }
   };
 
+  const loadDownloadSources = async (episode = downloadEpisode) => {
+    setDownloadLoading(true);
+    setDownloadError('');
+    setDownloadSources([]);
+    setDownloadIndex(0);
+    try {
+      const data = await api.resolveSource({ tmdbId: item.id, imdbId: details?.imdb_id || item.imdb_id, type: mediaType, season: isTv ? selectedSeason : undefined, episode: isTv ? episode : undefined, preferredLanguage });
+      const found = (data.streams || []).filter(stream => stream.infoHash || (stream.url && /^https:\/\//i.test(stream.url) && /\.(mp4|webm)(?:[?#]|$)/i.test(stream.url)));
+      setDownloadSources(found.slice(0, 40));
+      if (!found.length) setDownloadError('No hay una fuente descargable para este título. Puedes usar un enlace directo MP4/WebM disponible para ti.');
+    } catch (error) { setDownloadError(error.response?.data?.error || 'No se pudieron consultar las fuentes.'); }
+    finally { setDownloadLoading(false); }
+  };
+
+  const startOfflineDownload = async () => {
+    setDownloadBusy(true);
+    setDownloadError('');
+    setDownloadSuccess('');
+    const chosen = downloadUrl.trim() ? { url: downloadUrl.trim() } : downloadSources[downloadIndex];
+    try {
+      if (!chosen) throw new Error('Selecciona una fuente o pega un enlace directo.');
+      const source = chosen.infoHash ? { infoHash: chosen.infoHash, fileIdx: chosen.fileIdx, season: isTv ? selectedSeason : undefined, episode: isTv ? downloadEpisode : undefined } : { url: chosen.url };
+      await api.startDownload(source, isTv ? `${title} · T${selectedSeason}:E${downloadEpisode}` : title, downloadQuality);
+      setDownloadSuccess('Descarga iniciada. Puedes seguirla en la sección Descargas.');
+    } catch (error) { setDownloadError(error.response?.data?.error || error.message || 'No se pudo iniciar la descarga.'); }
+    finally { setDownloadBusy(false); }
+  };
+
   return (
     <div
       className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-start justify-center overflow-y-auto p-2 sm:p-6 animate-fadeIn"
@@ -353,6 +392,16 @@ export default function DetailModal({
                     <span className="hidden sm:inline">Desde el inicio</span>
                   </button>
                 )}
+
+                <button
+                  type="button"
+                  onClick={() => { setDownloadOpen(true); setDownloadEpisode(savedEntry?.episode || 1); setDownloadSuccess(''); setDownloadUrl(''); void loadDownloadSources(savedEntry?.episode || 1); }}
+                  className="flex items-center gap-1.5 px-3.5 py-2.5 bg-neutral-800/90 hover:bg-neutral-700 text-white font-semibold text-xs sm:text-sm rounded-[4px] border border-white/20 transition"
+                  title="Guardar para ver sin conexión"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Descargar</span>
+                </button>
 
                 {onToggleWatchlist && (
                   <button
@@ -900,6 +949,33 @@ export default function DetailModal({
           </div>
         </div>
       </div>
+      {downloadOpen && (
+        <div className="fixed inset-0 z-[70] bg-black/80 flex items-center justify-center p-4" onClick={(event) => event.stopPropagation()}>
+          <div role="dialog" aria-modal="true" aria-label="Descarga offline" className="w-full max-w-lg rounded-xl border border-white/20 bg-[#202020] p-5 shadow-2xl text-white max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between gap-3 mb-4"><h2 className="text-lg font-bold flex items-center gap-2"><Download size={19} /> Descargar para ver offline</h2><button type="button" onClick={() => setDownloadOpen(false)} aria-label="Cerrar descargas"><X size={20} /></button></div>
+            <p className="text-sm text-neutral-300 mb-4">{title}{isTv ? ` · Temporada ${selectedSeason}, episodio ${downloadEpisode}` : ''}</p>
+            {isTv && <label className="text-xs text-neutral-300 block mb-3">Episodio <input type="number" min="1" max="999" value={downloadEpisode} onChange={event => setDownloadEpisode(Number(event.target.value) || 1)} onBlur={() => void loadDownloadSources(downloadEpisode)} className="ml-2 w-20 rounded bg-black/60 p-2" /></label>}
+            <label className="text-xs text-neutral-300 block mb-3">Calidad offline
+              <select value={downloadQuality} onChange={event => setDownloadQuality(event.target.value)} className="block w-full mt-1 rounded bg-black/60 p-2 text-sm text-white">
+                <option value="compact">Compacta · 720p máximo, video H.264 y audio AAC</option>
+                <option value="original">Original · sin recomprimir, MP4/WebM hasta 2 GB</option>
+              </select>
+            </label>
+            <p className="text-xs text-neutral-400 mb-3">La versión compacta guarda la película o el episodio completo. Su tamaño final depende de la duración y del origen; la conversión puede tardar.</p>
+            <label className="text-xs text-neutral-300 block mb-2">Fuente encontrada
+              <select value={downloadIndex} onChange={event => setDownloadIndex(Number(event.target.value))} disabled={!downloadSources.length} className="block w-full mt-1 rounded bg-black/60 p-2 text-sm text-white disabled:opacity-50">
+                {downloadSources.length ? downloadSources.map((stream, index) => <option key={`${stream.infoHash || stream.url}-${index}`} value={index}>{stream.source || 'Fuente'} · {stream.resolution || 'HD'} · {stream.language || 'Idioma sin confirmar'} {stream.size ? `· ${stream.size}` : ''}</option>) : <option>{downloadLoading ? 'Buscando fuentes…' : 'Sin fuentes automáticas'}</option>}
+              </select>
+            </label>
+            <label className="text-xs text-neutral-300 block mb-4">O pega un enlace MP4/WebM directo propio
+              <input type="url" value={downloadUrl} onChange={event => setDownloadUrl(event.target.value)} placeholder="https://servidor.example/video.mp4" className="block w-full mt-1 rounded bg-black/60 p-2 text-sm text-white" />
+            </label>
+            {downloadError && <p role="alert" className="text-xs text-amber-300 mb-3">{downloadError}</p>}
+            {downloadSuccess && <p role="status" className="text-xs text-emerald-300 mb-3">{downloadSuccess}</p>}
+            <button type="button" onClick={startOfflineDownload} disabled={downloadBusy || downloadLoading || (!downloadUrl.trim() && !downloadSources.length)} className="w-full rounded bg-white text-black font-bold py-2.5 disabled:opacity-50">{downloadBusy ? 'Iniciando…' : 'Iniciar descarga offline'}</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
