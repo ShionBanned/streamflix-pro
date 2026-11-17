@@ -31,3 +31,4 @@ Thumbs.db
 _archived_legacy/
 .local/
 __pycache__/
+*.bin

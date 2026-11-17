@@ -1,9 +1,10 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, session } = require('electron');
 const path = require('node:path');
 const http = require('node:http');
 const net = require('node:net');
 const { spawn } = require('node:child_process');
 const { UpdateEngine } = require('./updater.cjs');
+const { setupAdblocker } = require('./adblocker.cjs');
 
 let mainWindow = null;
 let backendProcess = null;
@@ -186,6 +187,26 @@ function createWindow() {
     },
   });
 
+  // 1. Bloqueo total de ventanas emergentes (Popups y Popunders)
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    console.log(`[Seguridad] Popup bloqueado hacia: ${url}`);
+    return { action: 'deny' };
+  });
+
+  // 2. Bloqueo de secuestro de navegación (Anti-Hijack)
+  mainWindow.webContents.on('will-navigate', (event, navigationUrl) => {
+    try {
+      const parsedUrl = new URL(navigationUrl);
+      const allowedOrigin = new URL(activeBackendUrl).origin;
+      if (parsedUrl.origin !== allowedOrigin) {
+        event.preventDefault();
+        console.warn(`[Seguridad] Redirección no autorizada bloqueada: ${navigationUrl}`);
+      }
+    } catch {
+      event.preventDefault();
+    }
+  });
+
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
   });
@@ -244,6 +265,11 @@ app.whenReady().then(async () => {
       await checkBackendHealth(activeBackendUrl, 15000);
     }
   }
+
+  // Iniciar motor de bloqueo de publicidad y rastreo (Modo Completo: EasyList + EasyPrivacy + uBlock)
+  setupAdblocker(session.defaultSession).catch((err) => {
+    console.warn('[Adblock] Fallo no crítico al iniciar filtros:', err.message);
+  });
 
   createWindow();
   setupAutoUpdater();
