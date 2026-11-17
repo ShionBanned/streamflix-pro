@@ -1,6 +1,6 @@
 {
   "name": "stream-backend",
-  "version": "5.9.0",
+  "version": "5.9.1",
   "description": "Backend Middleware for Hybrid Streaming Platform",
   "type": "module",
   "main": "server.js",

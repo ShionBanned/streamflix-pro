@@ -1,7 +1,7 @@
 {
   "name": "streamflix",
   "productName": "StreamFlix",
-  "version": "5.9.0",
+  "version": "5.9.1",
   "description": "StreamFlix Pro - Plataforma Personal de Streaming Híbrida para Windows",
   "main": "electron/main.cjs",
   "author": "Shion",
@@ -20,16 +20,21 @@
     "pack:electron": "npm run build:frontend && electron-builder --dir"
   },
   "dependencies": {
-    "electron-updater": "^6.8.11"
+    "axios": "^1.7.9",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "electron-updater": "^6.8.11",
+    "express": "^4.21.2",
+    "webtorrent": "^2.6.2"
   },
   "devDependencies": {
-    "axios": "^1.21.1",
     "electron": "^34.2.0",
     "electron-builder": "^25.1.8"
   },
   "build": {
     "appId": "com.shion.streamflix",
     "productName": "StreamFlix",
+    "asar": false,
     "directories": {
       "output": "dist-electron"
     },

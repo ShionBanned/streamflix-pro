@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('node:path');
 const http = require('node:http');
+const net = require('node:net');
 const { spawn } = require('node:child_process');
 const { UpdateEngine } = require('./updater.cjs');
 
@@ -8,8 +9,8 @@ let mainWindow = null;
 let backendProcess = null;
 let updateEngine = null;
 
-const PORT = process.env.PORT || 4000;
-const BACKEND_URL = `http://127.0.0.1:${PORT}`;
+let activePort = process.env.PORT || 4000;
+let activeBackendUrl = `http://127.0.0.1:${activePort}`;
 
 // Evitar múltiples instancias simultáneas
 const gotTheLock = app.requestSingleInstanceLock();
@@ -24,22 +25,71 @@ if (!gotTheLock) {
   });
 }
 
-function checkBackendHealth(timeoutMs = 15000) {
+function getAppPaths() {
+  if (app.isPackaged) {
+    const appDir = path.join(process.resourcesPath, 'app');
+    return {
+      backendEntry: path.join(appDir, 'backend', 'server.js'),
+      staticDir: path.join(appDir, 'frontend', 'dist'),
+    };
+  }
+  return {
+    backendEntry: path.resolve(__dirname, '..', 'backend', 'server.js'),
+    staticDir: path.resolve(__dirname, '..', 'frontend', 'dist'),
+  };
+}
+
+function getAvailablePort(preferredPort = 4000) {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.once('error', () => {
+      // Puerto preferido ocupado, asignar uno libre disponible por el sistema operativo
+      const fallbackServer = net.createServer();
+      fallbackServer.listen(0, '127.0.0.1', () => {
+        const port = fallbackServer.address().port;
+        fallbackServer.close(() => resolve(port));
+      });
+    });
+    server.once('listening', () => {
+      server.close(() => resolve(preferredPort));
+    });
+    server.listen(preferredPort, '127.0.0.1');
+  });
+}
+
+function checkBackendHealth(targetUrl, timeoutMs = 15000) {
   const start = Date.now();
   return new Promise((resolve) => {
     const probe = () => {
-      const req = http.get(`${BACKEND_URL}/api/health`, (res) => {
+      const req = http.get(`${targetUrl}/api/health`, (res) => {
         if (res.statusCode === 200) {
-          resolve(true);
+          let body = '';
+          res.on('data', (c) => { body += c; });
+          res.on('end', () => {
+            try {
+              const data = JSON.parse(body);
+              if (data && data.status === 'online') {
+                resolve(true);
+                return;
+              }
+            } catch {
+              // Respuesta incompleta o no-JSON durante arranque inicial; se reintentará en el siguiente probe
+            }
+            if (Date.now() - start < timeoutMs) {
+              setTimeout(probe, 200);
+            } else {
+              resolve(false);
+            }
+          });
         } else if (Date.now() - start < timeoutMs) {
-          setTimeout(probe, 250);
+          setTimeout(probe, 200);
         } else {
           resolve(false);
         }
       });
       req.on('error', () => {
         if (Date.now() - start < timeoutMs) {
-          setTimeout(probe, 250);
+          setTimeout(probe, 200);
         } else {
           resolve(false);
         }
@@ -50,20 +100,18 @@ function checkBackendHealth(timeoutMs = 15000) {
   });
 }
 
-function startBackend() {
-  const backendEntry = path.resolve(__dirname, '..', 'backend', 'server.js');
-  const staticDir = path.resolve(__dirname, '..', 'frontend', 'dist');
+function startBackend(port) {
+  const { backendEntry, staticDir } = getAppPaths();
 
   const env = {
     ...process.env,
-    PORT: String(PORT),
+    PORT: String(port),
     NODE_ENV: 'production',
     STREAMFLIX_STATIC_DIR: staticDir,
     ELECTRON_RUN_AS_NODE: '1',
   };
 
-  // En Electron empaquetado, process.execPath con ELECTRON_RUN_AS_NODE=1 ejecuta Node.js nativo sin dependencias externas
-  const nodeBinary = app.isPackaged ? process.execPath : process.execPath;
+  const nodeBinary = process.execPath;
 
   backendProcess = spawn(nodeBinary, [backendEntry], {
     env,
@@ -94,7 +142,7 @@ async function stopBackendGracefully() {
   await new Promise((resolve) => {
     const postData = JSON.stringify({});
     const req = http.request(
-      `${BACKEND_URL}/api/system/shutdown`,
+      `${activeBackendUrl}/api/system/shutdown`,
       {
         method: 'POST',
         headers: {
@@ -142,7 +190,7 @@ function createWindow() {
     mainWindow.show();
   });
 
-  mainWindow.loadURL(BACKEND_URL);
+  mainWindow.loadURL(activeBackendUrl);
 
   mainWindow.on('closed', () => {
     mainWindow = null;
@@ -182,11 +230,19 @@ function setupAutoUpdater() {
 }
 
 app.whenReady().then(async () => {
-  // Comprobar si el backend ya está corriendo externamente (por ejemplo, en desarrollo)
-  const alreadyRunning = await checkBackendHealth(800);
-  if (!alreadyRunning) {
-    startBackend();
-    await checkBackendHealth(15000);
+  // En producción siempre levantar backend propio en un puerto disponible
+  if (app.isPackaged) {
+    activePort = await getAvailablePort(4000);
+    activeBackendUrl = `http://127.0.0.1:${activePort}`;
+    startBackend(activePort);
+    await checkBackendHealth(activeBackendUrl, 15000);
+  } else {
+    // En desarrollo verificar si ya hay un backend corriendo en el puerto configurado
+    const alreadyRunning = await checkBackendHealth(activeBackendUrl, 800);
+    if (!alreadyRunning) {
+      startBackend(activePort);
+      await checkBackendHealth(activeBackendUrl, 15000);
+    }
   }
 
   createWindow();
