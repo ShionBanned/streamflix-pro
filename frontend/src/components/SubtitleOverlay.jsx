@@ -58,7 +58,7 @@ function renderFormattedLine(line, lineIndex) {
   if (lastIndex < line.length) {
     tokens.push(
       <span
-        key={`${lineIndex}-${key++}`}
+        key={`${lineIndex}-${key}`}
         style={{
           fontStyle: italic ? 'italic' : 'normal',
           fontWeight: bold ? 700 : undefined,
@@ -158,18 +158,18 @@ export default function SubtitleOverlay({
   return (
     <div
       aria-live="off"
-      className="pointer-events-none absolute left-0 right-0 z-20 flex flex-col items-center justify-end px-4 sm:px-10 transition-[bottom] duration-300 ease-nf-out select-none"
+      className="pointer-events-none absolute left-0 right-0 z-20 flex flex-col items-center justify-end px-4 sm:px-10 transition-[bottom] duration-300 ease-out select-none"
       style={{ bottom }}
     >
       <div className="max-w-[82%] sm:max-w-[74%] flex flex-col items-center gap-1.5 text-center">
         {activeCues.map((cue, idx) => (
           <div
             key={`${cue.start}-${idx}`}
-            className={`animate-nfCueFade ${
+            className={
               backdrop
                 ? 'px-3.5 py-1 rounded-md bg-black/65 backdrop-blur-[2px]'
                 : ''
-            }`}
+            }
             style={{
               fontFamily: NETFLIX_FONT_STACK,
               fontSize,

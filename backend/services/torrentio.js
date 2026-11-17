@@ -2,6 +2,7 @@ import { buildEmbedServers } from '../../shared/cloudProviders.mjs';
 import axios from 'axios';
 import https from 'https';
 import { queryAddonSources } from './addonSources.js';
+import { fetchEztvDirectStreams } from './eztv.js';
 
 const TORRENTIO_EXTENDED_BASE =
   'https://torrentio.strem.fun/providers=yts,eztv,rarbg,1337x,thepiratebay,kickasstorrents,torrentgalaxy,magnetdl,horriblesubs,nyaasi,tokyotosho,anidex,mejortorrent,wolfmax4k,cinecalidad,pelisenhd,spanish,besttorrents|language=latino,spanish/stream';
@@ -119,7 +120,7 @@ export function isBrowserNativeCompatible(stream) {
 }
 
 export function extractSize(title = '') {
-  const match = title.match(/💾\s*([\d\.]+\s*(?:GB|MB|TB))/i);
+  const match = title.match(/💾\s*([\d.]+\s*(?:GB|MB|TB))/i);
   return match ? match[1] : null;
 }
 
@@ -291,7 +292,7 @@ export async function getTorrentioStreams({
     } else {
       const endpoint = `${TORRENTIO_EXTENDED_BASE}/${isSeries ? 'series' : 'movie'}/${queryId}.json`;
 
-      const [torrentioRes, ytsStreams, addons] = await Promise.all([
+      const [torrentioRes, ytsStreams, addons, eztvStreams] = await Promise.all([
         axios
           .get(endpoint, {
             timeout: 6500,
@@ -304,6 +305,7 @@ export async function getTorrentioStreams({
           .catch(() => []),
         !isSeries ? fetchYtsDirectStreams(imdbId) : Promise.resolve([]),
         queryAddonSources({ imdbId, isSeries, season: season || 1, episode: episode || 1 }),
+        isSeries ? fetchEztvDirectStreams({ imdbId, season: season || 1, episode: episode || 1 }) : Promise.resolve([]),
       ]);
       addonStatuses = addons.statuses;
 
@@ -311,7 +313,7 @@ export async function getTorrentioStreams({
       const seenStreams = new Set();
       rawStreams = [];
 
-      for (const s of [...ytsStreams, ...torrentioRes, ...addons.streams]) {
+      for (const s of [...ytsStreams, ...torrentioRes, ...addons.streams, ...eztvStreams]) {
         if (!s?.infoHash && !s?.url) continue;
         const key = s.infoHash ? `${String(s.infoHash).toLowerCase()}:${s.fileIdx ?? ''}` : s.url;
         if (seenStreams.has(key)) continue;

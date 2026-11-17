@@ -100,7 +100,7 @@ export default function MediaGrid({
             {title}
           </h2>
         )}
-        <div className="py-12 bg-neutral-900/40 rounded-2xl border border-neutral-800/60 max-w-xl mx-auto p-6 space-y-3 animate-panelEnter">
+        <div className="py-12 bg-neutral-900/40 rounded-2xl border border-neutral-800/60 max-w-xl mx-auto p-6 space-y-3">
           <AlertCircle className="w-8 h-8 text-neutral-500 mx-auto" />
           <p className="text-sm font-semibold text-neutral-300">
             No se encontraron títulos con los filtros seleccionados.
@@ -108,7 +108,7 @@ export default function MediaGrid({
           {onRetry && (
             <button
               onClick={onRetry}
-              className="nf-btn px-4 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-xs font-bold text-white rounded-lg border border-neutral-700"
+              className="px-4 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-xs font-bold text-white rounded-lg border border-neutral-700 transition"
             >
               Restablecer / Reintentar
             </button>
@@ -144,19 +144,19 @@ export default function MediaGrid({
           <button
             onClick={() => scroll('left')}
             aria-label={`Desplazar ${title} a la izquierda`}
-            className="group/paddle hidden md:flex absolute left-0 top-10 bottom-3 z-30 w-14 bg-gradient-to-r from-black/75 via-black/35 to-transparent items-center justify-start pl-1.5 opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 transition-opacity duration-300 ease-nf-out"
+            className="hidden md:flex absolute left-0 top-10 bottom-3 z-30 w-14 bg-gradient-to-r from-black/60 to-transparent items-center justify-start pl-1.5 opacity-0 group-hover/row:opacity-100 transition-opacity duration-200"
           >
-            <span className="w-8 h-16 rounded-full bg-[#141414]/90 group-hover/paddle:bg-[#E50914] border border-white/15 text-white flex items-center justify-center shadow-2xl transition-all duration-300 ease-nf-spring group-hover/paddle:scale-110 group-active/paddle:scale-95">
-              <ChevronLeft className="w-6 h-6 transition-transform duration-200 group-hover/paddle:-translate-x-0.5" strokeWidth={2.5} />
+            <span className="w-7 h-14 rounded-full bg-[#141414]/85 hover:bg-[#262626]/95 border border-white/10 text-white flex items-center justify-center shadow-lg transition-colors">
+              <ChevronLeft className="w-6 h-6" strokeWidth={2.5} />
             </span>
           </button>
           <button
             onClick={() => scroll('right')}
             aria-label={`Desplazar ${title} a la derecha`}
-            className="group/paddle hidden md:flex absolute right-0 top-10 bottom-3 z-30 w-14 bg-gradient-to-l from-black/75 via-black/35 to-transparent items-center justify-end pr-1.5 opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100 transition-opacity duration-300 ease-nf-out"
+            className="hidden md:flex absolute right-0 top-10 bottom-3 z-30 w-14 bg-gradient-to-l from-black/60 to-transparent items-center justify-end pr-1.5 opacity-0 group-hover/row:opacity-100 transition-opacity duration-200"
           >
-            <span className="w-8 h-16 rounded-full bg-[#141414]/90 group-hover/paddle:bg-[#E50914] border border-white/15 text-white flex items-center justify-center shadow-2xl transition-all duration-300 ease-nf-spring group-hover/paddle:scale-110 group-active/paddle:scale-95">
-              <ChevronRight className="w-6 h-6 transition-transform duration-200 group-hover/paddle:translate-x-0.5" strokeWidth={2.5} />
+            <span className="w-7 h-14 rounded-full bg-[#141414]/85 hover:bg-[#262626]/95 border border-white/10 text-white flex items-center justify-center shadow-lg transition-colors">
+              <ChevronRight className="w-6 h-6" strokeWidth={2.5} />
             </span>
           </button>
         </>
@@ -166,9 +166,9 @@ export default function MediaGrid({
         ref={scrollRef}
         className={`${
           isHorizontal
-            ? 'flex gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar pb-3.5 pt-1.5 -mx-4 px-4 sm:-mx-6 sm:px-6 lg:-mx-[3.2%] lg:px-[3.2%] scroll-smooth'
+            ? 'flex gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar pb-3 pt-1 -mx-4 px-4 sm:-mx-6 sm:px-6 lg:-mx-[3.2%] lg:px-[3.2%] scroll-smooth'
             : 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-2.5 sm:gap-3'
-        } transition-transform duration-300 ease-nf-out ${isScrollingAnim ? 'scale-[0.996]' : 'scale-100'}`}
+        } transition-transform duration-300 ${isScrollingAnim ? 'scale-[0.997]' : 'scale-100'}`}
       >
         {displayItems.map((item, index) => {
           const itemId = item.id || item.tmdbId;
@@ -217,17 +217,17 @@ export default function MediaGrid({
                     src={backdropImg}
                     alt={itemTitle}
                     loading="lazy"
-                    className="w-full h-full object-cover transition-transform duration-500 ease-nf-out group-hover:scale-105"
+                    className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
                   />
 
-                  <div className="absolute bottom-0 left-0 right-0 h-1 bg-neutral-700/80 z-20">
+                  <div className="absolute bottom-0 left-0 right-0 h-1 bg-neutral-700/80">
                     <div
-                      className="h-full bg-[#E50914] transition-all duration-500 ease-nf-out shadow-[0_0_8px_#E50914]"
+                      className="h-full bg-[#E50914] transition-all"
                       style={{ width: `${item.progressPercent || 20}%` }}
                     />
                   </div>
 
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/35 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 ease-nf-out flex flex-col justify-between p-2.5">
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/35 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-2.5">
                     <div className="flex justify-end">
                       {onRemoveContinueWatching && (
                         <button
@@ -235,14 +235,14 @@ export default function MediaGrid({
                             e.stopPropagation();
                             onRemoveContinueWatching(itemId, item.season, item.episode);
                           }}
-                          className="nf-icon-btn w-6 h-6 rounded-full bg-black/75 hover:bg-[#E50914] text-white flex items-center justify-center"
+                          className="w-6 h-6 rounded-full bg-black/75 hover:bg-[#E50914] text-white flex items-center justify-center transition"
                           title="Quitar de Continuar Viendo"
                         >
                           <X className="w-3.5 h-3.5" />
                         </button>
                       )}
                     </div>
-                    <div className="card-overlay-actions flex items-end justify-between gap-2">
+                    <div className="flex items-end justify-between gap-2">
                       <div className="min-w-0">
                         <p className="text-xs font-bold text-white truncate">{itemTitle}</p>
                         <p className="text-[10px] text-neutral-300 font-medium">
@@ -255,7 +255,7 @@ export default function MediaGrid({
                             e.stopPropagation();
                             onSelectDetails(item);
                           }}
-                          className="nf-icon-btn w-7 h-7 rounded-full bg-neutral-900/85 text-white border border-white/30 flex items-center justify-center hover:bg-neutral-700"
+                          className="w-7 h-7 rounded-full bg-neutral-900/85 text-white border border-white/30 flex items-center justify-center hover:bg-neutral-700"
                           title="Más información"
                         >
                           <Info className="w-3.5 h-3.5" />
@@ -288,9 +288,9 @@ export default function MediaGrid({
                 key={`top10-${itemId}-${index}`}
                 onMouseEnter={() => api.prefetchTitle(item, currentLang.tmdbLang)}
                 onClick={() => onSelectDetails(item)}
-                className="media-card group relative flex-shrink-0 flex items-stretch w-[46vw] sm:w-[30vw] md:w-[22.5vw] lg:w-[19%] cursor-pointer select-none"
+                className="group relative flex-shrink-0 flex items-stretch w-[46vw] sm:w-[30vw] md:w-[22.5vw] lg:w-[19%] cursor-pointer select-none"
               >
-                <div className="w-[46%] flex items-end justify-end -mr-3 sm:-mr-4 z-0 pointer-events-none transition-transform duration-300 ease-nf-out group-hover:-translate-x-1">
+                <div className="w-[46%] flex items-end justify-end -mr-3 sm:-mr-4 z-0 pointer-events-none">
                   <svg viewBox="0 0 115 160" className="w-full h-full overflow-visible">
                     <text
                       x={rank === 10 ? '50%' : '56%'}
@@ -305,7 +305,7 @@ export default function MediaGrid({
                       fontWeight="700"
                       fontSize={rank === 10 ? '124' : '168'}
                       letterSpacing={rank === 10 ? '-8' : '0'}
-                      className="group-hover:stroke-[#E50914] transition-all duration-300 group-hover:drop-shadow-[0_0_16px_rgba(229,9,20,0.45)]"
+                      className="group-hover:stroke-[#E50914] transition-colors duration-300"
                     >
                       {rank}
                     </text>
@@ -317,38 +317,36 @@ export default function MediaGrid({
                     src={posterUrl}
                     alt={itemTitle}
                     loading="lazy"
-                    className="w-full h-full object-cover transition-transform duration-500 ease-nf-out group-hover:scale-105"
+                    className="w-full h-full object-cover"
                   />
                   {savedEntry && (
-                    <div className="absolute bottom-0 left-0 right-0 h-1 bg-neutral-800 z-20">
+                    <div className="absolute bottom-0 left-0 right-0 h-1 bg-neutral-800">
                       <div
                         className="h-full bg-[#E50914]"
                         style={{ width: `${savedEntry.progressPercent || 20}%` }}
                       />
                     </div>
                   )}
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/35 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-250 ease-nf-out flex flex-col justify-end p-2.5">
-                    <div className="card-overlay-actions">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onPlay(
-                            item,
-                            savedEntry?.season || (isTv ? 1 : null),
-                            savedEntry?.episode || (isTv ? 1 : null),
-                            savedEntry?.currentTime || 0,
-                            preferredLanguage
-                          );
-                        }}
-                        className="card-play-icon nf-icon-btn w-8 h-8 rounded-full bg-white text-black flex items-center justify-center mb-1.5 shadow-lg"
-                      >
-                        <Play className="w-4 h-4 fill-current ml-0.5" />
-                      </button>
-                      <p className="text-[11px] font-bold text-white line-clamp-1">{itemTitle}</p>
-                      <span className="text-[10px] text-emerald-400 font-bold">
-                        {savedEntry ? `Reanudar ${formatMinsSec(savedEntry.currentTime)}` : `${matchScore}% para ti`}
-                      </span>
-                    </div>
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/35 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex flex-col justify-end p-2.5">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onPlay(
+                          item,
+                          savedEntry?.season || (isTv ? 1 : null),
+                          savedEntry?.episode || (isTv ? 1 : null),
+                          savedEntry?.currentTime || 0,
+                          preferredLanguage
+                        );
+                      }}
+                      className="card-play-icon w-8 h-8 rounded-full bg-white text-black flex items-center justify-center mb-1.5 shadow-lg hover:scale-110 transition-transform"
+                    >
+                      <Play className="w-4 h-4 fill-current ml-0.5" />
+                    </button>
+                    <p className="text-[11px] font-bold text-white line-clamp-1">{itemTitle}</p>
+                    <span className="text-[10px] text-emerald-400 font-bold">
+                      {savedEntry ? `Reanudar ${formatMinsSec(savedEntry.currentTime)}` : `${matchScore}% para ti`}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -370,7 +368,7 @@ export default function MediaGrid({
                   src={cardImage}
                   alt={itemTitle}
                   loading="lazy"
-                  className="w-full h-full object-cover transition-transform duration-500 ease-nf-out group-hover:scale-[1.05]"
+                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-[1.04]"
                 />
 
                 {!isRow && rating && (
@@ -389,71 +387,69 @@ export default function MediaGrid({
                   </div>
                 )}
 
-                <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/45 to-transparent opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-250 ease-nf-out flex flex-col justify-end p-2.5 sm:p-3">
-                  <div className="card-overlay-actions">
-                    <div className="flex items-center gap-1.5 mb-1.5">
+                <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/45 to-transparent opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-200 flex flex-col justify-end p-2.5 sm:p-3">
+                  <div className="flex items-center gap-1.5 mb-1.5">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onPlay(
+                          item,
+                          savedEntry?.season || (isTv ? 1 : null),
+                          savedEntry?.episode || (isTv ? 1 : null),
+                          savedEntry?.currentTime || 0,
+                          preferredLanguage
+                        );
+                      }}
+                      className="card-play-icon w-8 h-8 rounded-full bg-white text-black hover:bg-neutral-200 flex items-center justify-center shadow-lg transition-transform hover:scale-110 active:scale-90"
+                      title={
+                        savedEntry
+                          ? `Reanudar en ${formatMinsSec(savedEntry.currentTime)}`
+                          : `Reproducir · ${currentLang.label}`
+                      }
+                    >
+                      <Play className="w-4 h-4 fill-current ml-0.5" />
+                    </button>
+
+                    {onToggleWatchlist && (
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          onPlay(
-                            item,
-                            savedEntry?.season || (isTv ? 1 : null),
-                            savedEntry?.episode || (isTv ? 1 : null),
-                            savedEntry?.currentTime || 0,
-                            preferredLanguage
-                          );
+                          onToggleWatchlist(item);
                         }}
-                        className="card-play-icon nf-icon-btn w-8 h-8 rounded-full bg-white text-black hover:bg-neutral-200 flex items-center justify-center shadow-lg"
-                        title={
-                          savedEntry
-                            ? `Reanudar en ${formatMinsSec(savedEntry.currentTime)}`
-                            : `Reproducir · ${currentLang.label}`
-                        }
+                        className={`w-8 h-8 rounded-full border flex items-center justify-center transition-transform hover:scale-110 ${
+                          inWatchlist
+                            ? 'bg-amber-500/30 text-amber-300 border-amber-400'
+                            : 'bg-neutral-900/85 text-white hover:bg-neutral-700 border-white/30'
+                        }`}
                       >
-                        <Play className="w-4 h-4 fill-current ml-0.5" />
+                        {inWatchlist ? (
+                          <Check className="w-3.5 h-3.5 text-amber-400" />
+                        ) : (
+                          <Bookmark className="w-3.5 h-3.5" />
+                        )}
                       </button>
+                    )}
 
-                      {onToggleWatchlist && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onToggleWatchlist(item);
-                          }}
-                          className={`nf-icon-btn w-8 h-8 rounded-full border flex items-center justify-center ${
-                            inWatchlist
-                              ? 'bg-amber-500/30 text-amber-300 border-amber-400'
-                              : 'bg-neutral-900/85 text-white hover:bg-neutral-700 border-white/30'
-                          }`}
-                        >
-                          {inWatchlist ? (
-                            <Check className="w-3.5 h-3.5 text-amber-400 animate-nfCheckPop" />
-                          ) : (
-                            <Bookmark className="w-3.5 h-3.5" />
-                          )}
-                        </button>
-                      )}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSelectDetails(item);
+                      }}
+                      className="w-8 h-8 rounded-full bg-neutral-900/85 text-white hover:bg-neutral-700 border border-white/30 flex items-center justify-center transition-transform hover:scale-110 ml-auto"
+                    >
+                      <Info className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
 
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onSelectDetails(item);
-                        }}
-                        className="nf-icon-btn w-8 h-8 rounded-full bg-neutral-900/85 text-white hover:bg-neutral-700 border border-white/30 flex items-center justify-center ml-auto"
-                      >
-                        <Info className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-
-                    <p className="text-xs font-bold text-white line-clamp-1">{itemTitle}</p>
-                    <div className="flex items-center gap-1.5 text-[10px] mt-0.5">
-                      <span className="text-emerald-400 font-bold">
-                        {savedEntry ? `En ${formatMinsSec(savedEntry.currentTime)}` : `${matchScore}% para ti`}
-                      </span>
-                      <span className="text-neutral-400">•</span>
-                      <span className="text-neutral-300">{releaseYear || (isTv ? 'Serie' : 'Película')}</span>
-                      <span className="text-neutral-400">•</span>
-                      <span className="text-amber-400 font-semibold">★ {rating}</span>
-                    </div>
+                  <p className="text-xs font-bold text-white line-clamp-1">{itemTitle}</p>
+                  <div className="flex items-center gap-1.5 text-[10px] mt-0.5">
+                    <span className="text-emerald-400 font-bold">
+                      {savedEntry ? `En ${formatMinsSec(savedEntry.currentTime)}` : `${matchScore}% para ti`}
+                    </span>
+                    <span className="text-neutral-400">•</span>
+                    <span className="text-neutral-300">{releaseYear || (isTv ? 'Serie' : 'Película')}</span>
+                    <span className="text-neutral-400">•</span>
+                    <span className="text-amber-400 font-semibold">★ {rating}</span>
                   </div>
                 </div>
               </div>
@@ -473,18 +469,7 @@ export default function MediaGrid({
           );
         })}
       </div>
-      {onLoadMore && !isHorizontal && (
-        <div className="flex justify-center pt-5 pb-2">
-          <button
-            type="button"
-            onClick={onLoadMore}
-            disabled={isLoadingMore}
-            className="nf-btn rounded-md border border-white/25 bg-[#262626] px-6 py-2.5 text-sm font-bold text-white hover:bg-[#393939] disabled:opacity-50"
-          >
-            {isLoadingMore ? 'Cargando más títulos…' : 'Ver más títulos'}
-          </button>
-        </div>
-      )}
+      {onLoadMore && !isHorizontal && <div className="flex justify-center pt-5 pb-2"><button type="button" onClick={onLoadMore} disabled={isLoadingMore} className="rounded-md border border-white/25 bg-[#262626] px-6 py-2.5 text-sm font-bold text-white hover:bg-[#393939] disabled:opacity-50">{isLoadingMore ? 'Cargando más títulos…' : 'Ver más títulos'}</button></div>}
     </div>
   );
 }

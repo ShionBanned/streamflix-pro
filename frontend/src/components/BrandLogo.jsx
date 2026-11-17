@@ -1,7 +1,7 @@
 import React from 'react';
 
 /**
- * Logotipo Tipográfico Estilo Netflix para STREAMFLIX con micro-interacción cinemática
+ * Logotipo Tipográfico Estilo Netflix para STREAMFLIX
  */
 export default function BrandLogo({ size = 'md', showSubtitle = true }) {
   const isSmall = size === 'sm';
@@ -18,7 +18,7 @@ export default function BrandLogo({ size = 'md', showSubtitle = true }) {
         fill="none"
         xmlns="http://www.w3.org/2000/svg"
         aria-label="STREAMFLIX"
-        className="overflow-visible transition-all duration-300 ease-nf-spring group-hover:scale-[1.035] group-active:scale-[0.97] group-hover:drop-shadow-[0_0_16px_rgba(229,9,20,0.55)]"
+        className="overflow-visible transition-opacity duration-200 group-hover:opacity-90"
       >
         <defs>
           <clipPath id="netflixArcClip">
@@ -43,8 +43,8 @@ export default function BrandLogo({ size = 'md', showSubtitle = true }) {
       </svg>
 
       {showSubtitle && (
-        <span className="text-[9px] text-neutral-400 uppercase tracking-[0.22em] font-semibold flex items-center gap-1.5 -mt-0.5 transition-colors duration-300 group-hover:text-neutral-200">
-          <span className="w-1.5 h-1.5 rounded-full bg-[#E50914] inline-block animate-pulse" />
+        <span className="text-[9px] text-neutral-400 uppercase tracking-[0.22em] font-semibold flex items-center gap-1.5 -mt-0.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-[#E50914] inline-block" />
           <span>CINEMA • CLÁSICOS • 4K</span>
         </span>
       )}

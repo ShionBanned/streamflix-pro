@@ -185,12 +185,15 @@ export function selectAudioTrack(tracks, { audioLang = 'vose', originalLanguage,
   return 0;
 }
 
-export function probeMedia(input, { spawnImpl = spawn, timeoutMs = 20000 } = {}) {
+export function probeMedia(input, { spawnImpl = spawn, timeoutMs = 12000 } = {}) {
   return new Promise(resolve => {
     let stderr = ''; let settled = false;
-    const process = spawnImpl('ffmpeg', ['-hide_banner', '-i', input, '-t', '0', '-f', 'null', '-'], { windowsHide: true });
+    const process = spawnImpl('ffmpeg', ['-hide_banner', '-analyzeduration', '4M', '-probesize', '4M', '-i', input, '-t', '0', '-f', 'null', '-'], { windowsHide: true });
     const finish = () => { if (settled) return; settled = true; clearTimeout(timeout); resolve(parseMediaInfo(stderr)); };
-    const timeout = setTimeout(() => { process.kill(); finish(); }, timeoutMs);
+    const timeout = setTimeout(() => {
+      try { process.kill(); } catch (_err) { /* Proceso ya finalizado */ }
+      finish();
+    }, timeoutMs);
     process.stderr.on('data', chunk => { if (stderr.length < 65536) stderr += chunk.toString(); });
     process.stdout.resume(); process.once('error', finish); process.once('close', finish);
   });
@@ -210,7 +213,10 @@ export function extractSubtitleVtt(input, trackIndex = 0, { spawnImpl = spawn, t
       clearTimeout(timer);
       reject(err);
     };
-    const timer = setTimeout(() => { child.kill(); finishError(new Error('Tiempo agotado extrayendo subtítulo integrado.')); }, timeoutMs);
+    const timer = setTimeout(() => {
+      try { child.kill(); } catch (_err) { /* Proceso cerrado */ }
+      finishError(new Error('Tiempo agotado extrayendo subtítulo integrado.'));
+    }, timeoutMs);
     child.stdout.on('data', chunk => { if (stdout.length < 4 * 1024 * 1024) stdout += chunk.toString('utf8'); });
     child.stderr.on('data', chunk => { if (stderr.length < 4096) stderr += chunk.toString('utf8'); });
     child.once('error', finishError);
@@ -229,75 +235,150 @@ const transcodeQueue = [];
 
 export function streamFfmpeg(input, req, res, { audioTrack = 0, transcodeVideo = false, startTime = 0, audioOffset = 0, spawnImpl = spawn } = {}) {
   const start = () => {
-  activeTranscode = true;
-  const seekArgs = startTime > 0 ? ['-noaccurate_seek', '-ss', String(startTime)] : [];
+    activeTranscode = true;
+    const seekArgs = startTime > 0 ? ['-noaccurate_seek', '-ss', String(startTime)] : [];
 
-  const audioFilters = [];
-  const offsetNum = Number(audioOffset) || 0;
-  if (offsetNum > 0) {
-    const ms = Math.round(offsetNum * 1000);
-    audioFilters.push(`adelay=${ms}|${ms}`);
-  } else if (offsetNum < 0) {
-    const sec = Math.abs(offsetNum);
-    audioFilters.push(`atrim=start=${sec}`, 'asetpts=PTS-STARTPTS');
+    const audioFilters = [];
+    const offsetNum = Number(audioOffset) || 0;
+    if (offsetNum > 0) {
+      const ms = Math.round(offsetNum * 1000);
+      audioFilters.push(`adelay=${ms}|${ms}`);
+    } else if (offsetNum < 0) {
+      const sec = Math.abs(offsetNum);
+      audioFilters.push(`atrim=start=${sec}`, 'asetpts=PTS-STARTPTS');
+    }
+    audioFilters.push('aresample=async=1000');
+
+    const args = [
+      '-hide_banner',
+      '-loglevel', 'error',
+      ...seekArgs,
+      '-i', input,
+      '-map', '0:v:0',
+      '-map', `0:a:${audioTrack}?`,
+      ...(transcodeVideo
+        ? ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p']
+        : ['-c:v', 'copy']),
+      '-c:a', 'aac',
+      '-ac', '2',
+      '-b:a', '192k',
+      '-af', audioFilters.join(','),
+      '-avoid_negative_ts', 'make_zero',
+      '-max_muxing_queue_size', '1024',
+      '-sn',
+      '-dn',
+      '-f', 'mp4',
+      '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+      'pipe:1'
+    ];
+    const child = spawnImpl('ffmpeg', args, { windowsHide: true });
+    let closed = false;
+    let started = false;
+    let stderrBuffer = '';
+
+    const stop = () => {
+      if (!closed) {
+        try { child.kill(); } catch (_err) { /* Proceso terminado */ }
+      }
+    };
+    res.once('close', stop);
+    req.once('aborted', stop);
+
+    let inactivityWatchdog = null;
+    const cleanup = () => {
+      if (closed) return;
+      closed = true;
+      if (inactivityWatchdog) {
+        clearTimeout(inactivityWatchdog);
+        inactivityWatchdog = null;
+      }
+      res.off('close', stop);
+      req.off('aborted', stop);
+      activeTranscode = false;
+      while (transcodeQueue.length) {
+        const next = transcodeQueue.shift();
+        if (!next.cancelled) {
+          next.start();
+          break;
+        }
+      }
+    };
+
+    inactivityWatchdog = setTimeout(() => {
+      if (!started && !closed) {
+        console.warn('[StreamEngine] FFmpeg sin emitir datos en 25s. Cancelando y liberando cola.');
+        try { child.kill(); } catch (_err) { /* Timeout kill */ }
+        cleanup();
+        failure();
+      }
+    }, 25000);
+
+    child.stderr.on('data', chunk => {
+      if (stderrBuffer.length < 8192) stderrBuffer += chunk.toString();
+    });
+
+    child.stdout.once('data', () => {
+      started = true;
+      if (inactivityWatchdog) {
+        clearTimeout(inactivityWatchdog);
+        inactivityWatchdog = null;
+      }
+      if (!res.headersSent) {
+        res.writeHead(200, {
+          'Content-Type': 'video/mp4',
+          'Cache-Control': 'no-store',
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Headers': '*',
+          'X-Audio-Engine': 'FFmpeg-AAC-2.0',
+          'X-Stream-Start': String(startTime),
+        });
+      }
+    });
+
+    child.stdout.pipe(res, { end: false });
+
+    const failure = () => {
+      if (res.destroyed || res.writableEnded) return;
+      if (stderrBuffer.trim()) {
+        console.warn('[StreamEngine] Fallo FFmpeg:', stderrBuffer.trim());
+      }
+      if (res.headersSent) {
+        res.destroy();
+      } else {
+        res.status(502).json({
+          error: 'FFmpeg no pudo convertir esta fuente. Prueba otra pista o abre el archivo en VLC.',
+          details: stderrBuffer.trim() || undefined,
+        });
+      }
+    };
+
+    child.once('error', () => { cleanup(); failure(); });
+    child.once('close', code => { cleanup(); if (code === 0 && started) res.end(); else failure(); });
+    return child;
+  };
+
+  if (!activeTranscode) return start();
+  if (transcodeQueue.length >= 2) {
+    res.status(429).json({ error: 'El conversor está ocupado. Reintenta en unos segundos.' });
+    return null;
   }
-  audioFilters.push('aresample=async=1000');
-
-  const args = [
-    '-hide_banner',
-    '-loglevel', 'error',
-    ...seekArgs,
-    '-i', input,
-    '-map', '0:v:0',
-    '-map', `0:a:${audioTrack}?`,
-    ...(transcodeVideo
-      ? ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-pix_fmt', 'yuv420p']
-      : ['-c:v', 'copy']),
-    '-c:a', 'aac',
-    '-ac', '2',
-    '-b:a', '192k',
-    '-af', audioFilters.join(','),
-    '-avoid_negative_ts', 'make_zero',
-    '-max_muxing_queue_size', '1024',
-    '-sn',
-    '-dn',
-    '-f', 'mp4',
-    '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
-    'pipe:1'
-  ];
-  const child = spawnImpl('ffmpeg', args, { windowsHide: true });
-  let closed = false; let started = false;
-  const stop = () => { if (!closed) child.kill(); };
-  res.once('close', stop); req.once('aborted', stop);
-  const cleanup = () => {
-    if (closed) return;
-    closed = true; res.off('close', stop); req.off('aborted', stop);
-    activeTranscode = false;
-    while (transcodeQueue.length) {
-      const next = transcodeQueue.shift();
-      if (!next.cancelled) { next.start(); break; }
+  const pending = {
+    cancelled: false,
+    start: () => {
+      res.off('close', cancel);
+      req.off('aborted', cancel);
+      if (!pending.cancelled) start();
     }
   };
-  child.stderr.resume();
-  child.stdout.once('data', () => {
-    started = true;
-    if (!res.headersSent) res.writeHead(200, { 'Content-Type': 'video/mp4', 'Cache-Control': 'no-store', 'X-Audio-Engine': 'FFmpeg-AAC-2.0', 'X-Stream-Start': String(startTime) });
-  });
-  child.stdout.pipe(res, { end: false });
-  const failure = () => {
-    if (res.destroyed || res.writableEnded) return;
-    if (res.headersSent) res.destroy();
-    else res.status(502).json({ error: 'FFmpeg no pudo convertir esta fuente. Prueba otra pista o abre el archivo en VLC.' });
+  const cancel = () => {
+    pending.cancelled = true;
+    res.off('close', cancel);
+    req.off('aborted', cancel);
+    const idx = transcodeQueue.indexOf(pending);
+    if (idx !== -1) transcodeQueue.splice(idx, 1);
   };
-  child.once('error', () => { cleanup(); failure(); });
-  child.once('close', code => { cleanup(); if (code === 0 && started) res.end(); else failure(); });
-  return child;
-  };
-  if (!activeTranscode) return start();
-  if (transcodeQueue.length >= 2) { res.status(429).json({ error: 'El conversor está ocupado. Reintenta en unos segundos.' }); return null; }
-  const pending = { cancelled: false, start: () => { res.off('close', cancel); req.off('aborted', cancel); if (!pending.cancelled) start(); } };
-  const cancel = () => { pending.cancelled = true; res.off('close', cancel); req.off('aborted', cancel); };
-  res.once('close', cancel); req.once('aborted', cancel);
+  res.once('close', cancel);
+  req.once('aborted', cancel);
   transcodeQueue.push(pending);
   return null;
 }

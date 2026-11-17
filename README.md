@@ -42,6 +42,7 @@ Plataforma personal de streaming para películas, series (VOD), anime estilo Cru
 ### 1. Torrentio Pro (Trackers Latino & Anime)
 - Indexación de proveedores en español: `cinecalidad`, `pelisenhd`, `spanish`.
 - Indexación de proveedores de anime: `nyaasi`, `tokyotosho`, `anidex`, `horriblesubs`.
+- Búsqueda directa de episodios en la API pública de EZTV como respaldo de Torrentio, sin clave de API.
 - **Sistema de Puntuación:**
   - Pistas en español latino (`🇲🇽`, `Latino`, `Cinecalidad`, `Dual`, `Multi`): +500 pts.
   - Pistas en castellano (`🇪🇸`, `Castellano`, `Spa`): +300 pts.
@@ -72,8 +73,8 @@ Plataforma personal de streaming para películas, series (VOD), anime estilo Cru
 - **Sincronizador en Vivo:** Botones `Sub -0.5s` y `Sub +0.5s` para corregir desfaces en tiempo real.
 - **Autolimpieza de Disco:** Al cerrar el reproductor o cambiar de título, el backend ejecuta `torrent.destroy({ destroyStore: true })`, garantizando que la memoria y el disco temporal nunca se llenen.
 
-### 6. Agregador Multi-Fuente IPTV & Pluto TV 24/7 (+4,800 Canales)
-- **Fusión en Paralelo:** Descarga y normaliza 10 fuentes públicas M3U en español mundial, España, México, Colombia, Argentina, USA, Deportes y 592 canales FAST 24/7 de Pluto TV.
+### 6. Agregador IPTV de listas públicas
+- **Fusión en Paralelo:** Descarga y normaliza nueve listas públicas M3U por idioma, país y categoría. Los canales FAST aparecen cuando figuran en esas listas; no existe una integración directa con el catálogo de Pluto TV.
 - **Soporte Xtream Codes & M3U Privadas:** Modal para importar listas privadas o servidores Xtream Codes con persistencia en `localStorage`.
 - **Proxy Anti-CORS con Reescritura Dinámica:** Reescribe las rutas de los manifiestos `.m3u8` y chunks `.ts` para que todas las peticiones pasen por el middleware con cabeceras `Access-Control-Allow-Origin: *`.
 - **Integración Nativa VLC Media Player:** 1 clic para abrir cualquier stream o canal en VLC con aceleración por hardware completa y decodificación de audio multicanal (AC3/DTS/E-AC3).
@@ -105,4 +106,24 @@ La corrección de FFmpeg, los ajustes de subtítulos y la propuesta de IA están
 # Actualización de fuentes, audio y subtítulos
 
 Consulta [la revisión del 15 de noviembre de 2026](REVIEW_UPDATE_2026-11-15.md) para el aislamiento de proveedores externos, fuentes directas guardadas, audio latino externo y subtítulos con Whisper local.
+
+## Mantenimiento y offline HLS (17/11/2026)
+
+La ficha y el reproductor aceptan para descarga un enlace HTTPS `.m3u8` de video bajo demanda. El servidor descarga manifiesto y segmentos TS/fMP4, verifica que cada destino sea HTTPS público y guarda un MP4 local. Se admiten listas VOD completas sin DRM y con audio integrado. Las señales en vivo, cifrado, audio HLS separado y listas con rangos quedan fuera de este flujo.
+
+Comprobaciones desde cada carpeta:
+
+```powershell
+cd backend
+npm run check
+npm run lint
+npm test
+cd ../frontend
+npm run lint
+npm run typecheck
+npm test
+npm run build
+```
+
+El tipado gradual cubre los utilitarios y controles nuevos; todavía no es una migración completa a TypeScript. La [nota de mantenimiento](MAINTENANCE_2026-11-17.md) describe el alcance y las integraciones que requieren configuración externa.
 

@@ -2,6 +2,8 @@
 
 Las dos propuestas se evaluaron contra la aplicación que se ejecuta en `Netflix 2.0 - copia`. Sus cifras de rendimiento, disponibilidad de canales y resultados de pruebas se tratan como hipótesis del documento, no como mediciones de esta versión.
 
+**Actualización del 17/11/2026:** la sección Premium y sus enlaces a planes de pago se retiraron a petición del usuario. Las menciones posteriores describen el estado histórico del 16/11/2026.
+
 ## Parte 1: carga y audio
 
 - `SmartPlayer` y `LiveTV` se cargan bajo demanda con una pantalla de espera breve. La compilación separa ambos módulos del archivo principal.
@@ -28,7 +30,7 @@ Las dos propuestas se evaluaron contra la aplicación que se ejecuta en `Netflix
 
 ## Trabajo que requiere un contrato de fuente o una fase propia
 
-- Descargas offline: la ficha de cada título permite elegir una fuente P2P publicada o un MP4/WebM directo vía HTTPS. La opción compacta descarga el video completo y convierte hasta 720p H.264/AAC con CRF 30; verifica la duración de la salida y conserva el original compatible si es más pequeño. Biblioteca local, progreso, reproducción por rangos y borrado. Máximo 4 GB de entrada, 2 GB de salida, 5 GB de biblioteca y dos trabajos simultáneos; las conversiones se serializan. Las URLs no se guardan en el índice. HLS, páginas externas y señales premium no se descargan con este flujo.
+- Descargas offline (estado original del 16/11): la ficha de cada título permitía elegir una fuente P2P publicada o un MP4/WebM directo vía HTTPS. La opción compacta descargaba el video completo y lo convertía. Biblioteca local, progreso, reproducción por rangos y borrado. Las URLs no se guardaban en el índice. La ampliación HLS VOD del 17/11 y sus límites se documentan en `MAINTENANCE_2026-11-17.md`.
 - Nuevos proveedores FAST, P2P y debrid: integrar solo contratos comprobados, permisos y enlaces vigentes; no asumir velocidades, catálogo o disponibilidad a partir de ejemplos del informe.
 - Canales de suscripción: la sección Premium enlaza a Win Play/Win Sports+, DGO, Movistar, Claro y Tigo, incluidos accesos a otros paquetes como HBO. TV en vivo acepta listas M3U y cuentas Xtream aportadas por el usuario cuando sus condiciones permiten la reproducción; una señal con DRM requiere acuerdo y licencia del proveedor. No se agregó un scraper ni descifrado de DRM.
 

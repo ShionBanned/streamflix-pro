@@ -8,12 +8,14 @@ import DetailModal from './components/DetailModal.jsx';
 import BrandLogo from './components/BrandLogo.jsx';
 import CustomSelect from './components/CustomSelect.jsx';
 import ProfilePage from './components/ProfilePage.jsx';
+import PlayerErrorBoundary from './components/PlayerErrorBoundary.jsx';
 import DiscoveryRows, { buildGenreRows } from './components/DiscoveryRows.jsx';
 import useUserMedia, { computePersonalizedPool } from './hooks/useUserMedia.js';
+import { MOVIE_GENRES, SERIES_GENRES, ANIME_GENRES, SORT_OPTIONS, TV_NETWORKS } from './utils/catalogOptions.js';
 
-import SmartPlayer from './components/SmartPlayer.jsx';
-import LiveTV from './components/LiveTV.jsx';
-import DownloadsPage from './components/DownloadsPage.jsx';
+const SmartPlayer = React.lazy(() => import('./components/SmartPlayer.jsx'));
+const LiveTV = React.lazy(() => import('./components/LiveTV.jsx'));
+const DownloadsPage = React.lazy(() => import('./components/DownloadsPage.jsx'));
 import {
   Film,
   Tv,
@@ -23,287 +25,6 @@ import {
   Bookmark,
   Layers,
 } from 'lucide-react';
-
-// Géneros personalizados estilo Netflix para PELÍCULAS (con integración pasiva de clásicos en cada género)
-const MOVIE_GENRES = [
-  {
-    id: 'all',
-    value: 'all',
-    label: 'Todos los Géneros',
-    icon: '🎬',
-    description: 'Vista completa con todas las filas de cine y taquilla',
-  },
-  {
-    id: '28',
-    value: '28',
-    label: 'Acción y Adrenalina',
-    icon: '💥',
-    badge: 'TOP',
-    description: 'Blockbusters explosivos, artes marciales y persecuciones',
-  },
-  {
-    id: '12',
-    value: '12',
-    label: 'Aventura Épica',
-    icon: '🗺️',
-    description: 'Viajes extraordinarios, supervivencia y mundos perdidos',
-  },
-  {
-    id: '878',
-    value: '878',
-    label: 'Ciencia Ficción y Cyberpunk',
-    icon: '🚀',
-    badge: 'SCI-FI',
-    description: 'Viajes espaciales, IA, futuros distópicos y multiversos',
-  },
-  {
-    id: '27',
-    value: '27',
-    label: 'Terror y Sobrenatural',
-    icon: '👻',
-    description: 'Horror psicológico, posesiones y slashers de culto',
-  },
-  {
-    id: '53',
-    value: '53',
-    label: 'Suspenso y Thrillers',
-    icon: '🕵️',
-    description: 'Giros inesperados, tensión al límite y misterio',
-  },
-  {
-    id: '35',
-    value: '35',
-    label: 'Comedia',
-    icon: '😂',
-    description: 'Humor irreverente, comedias románticas y sátira',
-  },
-  {
-    id: '80',
-    value: '80',
-    label: 'Crimen, Mafia y Atracos',
-    icon: '💼',
-    description: 'Gánsteres, robos maestros e investigaciones policiales',
-  },
-  {
-    id: '14',
-    value: '14',
-    label: 'Fantasía y Mundos Mágicos',
-    icon: '🐉',
-    description: 'Mitología, hechicería y leyendas épicas',
-  },
-  {
-    id: '18',
-    value: '18',
-    label: 'Drama y Obras Maestras',
-    icon: '🎭',
-    badge: 'ÓSCAR',
-    description: 'Historias intensas aclamadas por la crítica internacional',
-  },
-  {
-    id: '10749',
-    value: '10749',
-    label: 'Romance y Pasión',
-    icon: '❤️',
-    description: 'Historias de amor inolvidables y dramas románticos',
-  },
-  {
-    id: '16',
-    value: '16',
-    label: 'Animación y Familia',
-    icon: '🎨',
-    description: 'Grandes producciones animadas para todas las edades',
-  },
-  {
-    id: '9648',
-    value: '9648',
-    label: 'Misterio y Enigmas',
-    icon: '🧩',
-    description: 'Casos sin resolver, detectives y acertijos mentales',
-  },
-  {
-    id: '10752',
-    value: '10752',
-    label: 'Bélico e Historia',
-    icon: '⚔️',
-    description: 'Grandes batallas históricas y epopeyas basadas en hechos reales',
-  },
-  { id: '10751', value: '10751', label: 'Cine familiar', icon: '👨‍👩‍👧', description: 'Aventuras y comedias para ver en familia' },
-  { id: '99', value: '99', label: 'Documentales', icon: '🎥', description: 'Historias y personas reales' },
-  { id: '36', value: '36', label: 'Historia', icon: '🏛️', description: 'Relatos y acontecimientos históricos' },
-  { id: '37', value: '37', label: 'Western', icon: '🤠', description: 'Historias del viejo oeste' },
-  { id: '10402', value: '10402', label: 'Música y musicales', icon: '🎶', description: 'Conciertos, artistas y musicales' },
-  { id: '10770', value: '10770', label: 'Películas para TV', icon: '📺', description: 'Producciones originales para televisión' },
-];
-
-// Géneros personalizados estilo Netflix para SERIES
-const SERIES_GENRES = [
-  {
-    id: 'all',
-    value: 'all',
-    label: 'Todos los Géneros de Series',
-    icon: '📺',
-    description: 'Todas las categorías de series para maratonear',
-  },
-  {
-    id: '10759',
-    value: '10759',
-    label: 'Acción, Supervivencia y Aventura',
-    icon: '⚔️',
-    badge: 'POPULAR',
-    description: 'Series de alto impacto, batallas y misiones extremas',
-  },
-  {
-    id: '10765',
-    value: '10765',
-    label: 'Sci-Fi, Fantasía y Mundos Paralelos',
-    icon: '🛸',
-    badge: 'SCI-FI',
-    description: 'Distopías, superpoderes, magia y futuros alternativos',
-  },
-  {
-    id: '80',
-    value: '80',
-    label: 'Crimen, Narcos e Investigación',
-    icon: '🔍',
-    description: 'Detectives, cárteles, forenses y thrillers judiciales',
-  },
-  {
-    id: '9648',
-    value: '9648',
-    label: 'Misterio y Suspenso Psicológico',
-    icon: '🕯️',
-    description: 'Secretos oscuros, desapariciones y tramas hipnóticas',
-  },
-  {
-    id: '18',
-    value: '18',
-    label: 'Drama de Prestigio',
-    icon: '🎭',
-    badge: 'EMMY',
-    description: 'Las series dramáticas más premiadas de la televisión',
-  },
-  {
-    id: '35',
-    value: '35',
-    label: 'Comedias y Sitcoms Icónicas',
-    icon: '😂',
-    description: 'Sitcoms legendarias y comedias modernas para reír sin parar',
-  },
-  {
-    id: '16',
-    value: '16',
-    label: 'Animación Adulta y Cartoons',
-    icon: '🎨',
-    description: 'Series animadas irreverentes y cartoons inolvidables',
-  },
-  {
-    id: '10768',
-    value: '10768',
-    label: 'Política, Guerra y Espionaje',
-    icon: '♟️',
-    description: 'Conspiraciones de estado, agentes secretos y poder',
-  },
-  {
-    id: '10751',
-    value: '10751',
-    label: 'Series Familiares y Juveniles',
-    icon: '🌟',
-    description: 'Historias coming-of-age, instituto y aventuras en grupo',
-  },
-  {
-    id: '99',
-    value: '99',
-    label: 'Docuseries y True Crime',
-    icon: '📹',
-    description: 'Investigaciones reales, crímenes verídicos y naturaleza',
-  },
-  { id: '10762', value: '10762', label: 'Series infantiles', icon: '🧸', description: 'Historias para los más pequeños' },
-  { id: '10766', value: '10766', label: 'Telenovelas', icon: '💐', description: 'Historias largas y personajes inolvidables' },
-  { id: '10767', value: '10767', label: 'Talk shows', icon: '🎙️', description: 'Entrevistas, humor y conversación' },
-  { id: '10763', value: '10763', label: 'Actualidad', icon: '📰', description: 'Informativos y programas de actualidad' },
-  { id: '37', value: '37', label: 'Western', icon: '🤠', description: 'Series ambientadas en el oeste' },
-];
-
-// Géneros personalizados estilo Netflix/Crunchyroll para ANIME
-const ANIME_GENRES = [
-  {
-    id: 'all',
-    value: 'all',
-    label: 'Todos los Géneros de Anime',
-    icon: '🎌',
-    description: 'Vista completa con todos los carruseles de Anime y Simulcast',
-  },
-  {
-    id: '16,10759',
-    value: '16,10759',
-    label: 'Shonen y Batallas Épicas',
-    icon: '⚔️',
-    badge: 'SHONEN',
-    description: 'Combates legendarios, poderes sobrenaturales y torneos',
-  },
-  {
-    id: '16,10765',
-    value: '16,10765',
-    label: 'Isekai, Magia y Mundos de Fantasía',
-    icon: '🔮',
-    badge: 'ISEKAI',
-    description: 'Reencarnaciones en mundos RPG, demonios y hechicería',
-  },
-  {
-    id: '16,9648',
-    value: '16,9648',
-    label: 'Seinen y Misterio Psicológico',
-    icon: '🧠',
-    badge: 'SEINEN',
-    description: 'Tramas oscuras, juegos mentales y suspenso adulto',
-  },
-  {
-    id: '16,35',
-    value: '16,35',
-    label: 'Comedia Escolar y Slice of Life',
-    icon: '🌸',
-    description: 'Humor japonés, vida cotidiana y clubes estudiantiles',
-  },
-  {
-    id: '16,10749',
-    value: '16,10749',
-    label: 'Romance y Drama (Shojo / RomCom)',
-    icon: '💖',
-    description: 'Historias de amor, triángulos amorosos y emoción pura',
-  },
-  {
-    id: '16,80',
-    value: '16,80',
-    label: 'Cyberpunk, Crimen y Acción Oscura',
-    icon: '🌃',
-    description: 'Futuros distópicos, mercenarios y organizaciones secretas',
-  },
-  {
-    id: '16,18',
-    value: '16,18',
-    label: 'Drama Épico e Histórico',
-    icon: '🏯',
-    description: 'Samuráis, guerra, superación y relatos conmovedores',
-  },
-  { id: '16,10751', value: '16,10751', label: 'Anime para toda la familia', icon: '🌈', description: 'Aventuras animadas para disfrutar juntos' },
-  { id: '16,12', value: '16,12', label: 'Viajes y aventuras', icon: '🗺️', description: 'Mundos por descubrir y grandes viajes' },
-  { id: '16,99', value: '16,99', label: 'Documental animado', icon: '🎞️', description: 'Historias reales contadas con animación' },
-];
-
-const SORT_OPTIONS = [
-  { id: 'popularity.desc', value: 'popularity.desc', label: 'Tendencias y Más Populares', icon: '🔥' },
-  { id: 'vote_count.desc', value: 'vote_count.desc', label: 'Más Aclamados de Todos los Tiempos', icon: '🏆' },
-  { id: 'vote_average.desc', value: 'vote_average.desc', label: 'Mejor Calificados (IMDb/TMDB)', icon: '⭐' },
-];
-
-const TV_NETWORKS = [
-  { id: 'all', value: 'all', label: 'Todas las Cadenas', icon: '📺' },
-  { id: '213', value: '213', label: 'Netflix Originals', icon: '🔴', badge: 'TOP' },
-  { id: '49', value: '49', label: 'HBO / Max', icon: '🎭' },
-  { id: '2739', value: '2739', label: 'Disney+', icon: '✨' },
-  { id: '1024', value: '1024', label: 'Prime Video', icon: '💠' },
-  { id: '2552', value: '2552', label: 'Apple TV+', icon: '🍎' },
-];
 
 /** Completa las filas solo con títulos que coincidan con la etiqueta de género. */
 function ensureRowItems(sectionItems = [], fallbackPool = [], genreIds = [], sliceStart = 0) {
@@ -322,49 +43,6 @@ function ensureRowItems(sectionItems = [], fallbackPool = [], genreIds = [], sli
   }
 
   return out;
-}
-
-class PlayerErrorBoundary extends React.Component {
-  constructor(props) {
-    super(props);
-    this.state = { hasError: false, error: null };
-  }
-  static getDerivedStateFromError(error) {
-    return { hasError: true, error };
-  }
-  componentDidCatch(error, errorInfo) {
-    console.error('[PlayerErrorBoundary] Error atrapado en SmartPlayer:', error, errorInfo);
-  }
-  render() {
-    if (this.state.hasError) {
-      return (
-        <div className="fixed inset-0 z-50 bg-[#0a0a0a] flex flex-col items-center justify-center p-6 text-white text-center space-y-4">
-          <div className="w-14 h-14 rounded-full bg-red-600/20 border border-red-500/40 flex items-center justify-center text-red-500 text-2xl font-bold">
-            !
-          </div>
-          <h2 className="text-xl font-bold">Interrupción inesperada de reproducción</h2>
-          <p className="text-sm text-neutral-400 max-w-md">
-            {this.state.error?.message || 'Ocurrió un problema durante la reproducción.'}
-          </p>
-          <div className="flex gap-3 pt-2">
-            <button
-              onClick={() => this.setState({ hasError: false, error: null })}
-              className="px-5 py-2.5 bg-[#E50914] text-white rounded-lg text-sm font-bold hover:bg-red-700 transition"
-            >
-              Reintentar reproducción
-            </button>
-            <button
-              onClick={this.props.onClose}
-              className="px-5 py-2.5 bg-white/10 text-white rounded-lg text-sm font-bold hover:bg-white/20 transition"
-            >
-              Cerrar reproductor
-            </button>
-          </div>
-        </div>
-      );
-    }
-    return this.props.children;
-  }
 }
 
 export default function App() {
@@ -488,6 +166,12 @@ export default function App() {
 
   useEffect(() => {
     loadCatalogs();
+    // Precargar módulo y catálogo de TV en Vivo en segundo plano tras montar Inicio para que abra en 0ms
+    const warmTimer = window.setTimeout(() => {
+      import("./components/LiveTV.jsx").catch(() => {});
+      api.prefetchIptvChannels();
+    }, 600);
+    return () => window.clearTimeout(warmTimer);
   }, [loadCatalogs]);
 
   // Cargar resultados cuando el usuario elige un Género personalizado, Cadena u Ordenamiento
@@ -806,7 +490,7 @@ export default function App() {
         ) : activeTab === 'profile' ? (
           <ProfilePage profile={profile} onSave={saveProfile} movieGenres={MOVIE_GENRES} seriesGenres={SERIES_GENRES} preferredLanguage={preferredLanguage} onChangeLanguage={setPreferredLanguage} audioEnginePreset={audioEnginePreset} onChangeAudioPreset={setAudioEnginePreset} />
         ) : activeTab === 'watchlist' ? (
-          <div className="pt-24 sm:pt-28 px-4 sm:px-8 lg:px-12 max-w-[1480px] mx-auto animate-nfPageEnter">
+          <div className="pt-24 sm:pt-28 px-4 sm:px-8 lg:px-12 max-w-[1480px] mx-auto animate-fadeIn">
             <h1 className="text-3xl font-black mb-2 flex items-center gap-3">
               <Bookmark className="w-8 h-8 text-amber-400" />
               <span>Mi Lista</span>
@@ -837,7 +521,7 @@ export default function App() {
           </div>
         ) : activeTab === 'anime' ? (
           /* PESTAÑA: ANIME CON SUB-BARRA DE GÉNEROS PERSONALIZADOS ESTILO NETFLIX Y CARGA 100% GARANTIZADA */
-          <div className="pb-16 animate-nfPageEnter">
+          <div className="pb-16">
             {animeHeroPool.length > 0 && (
               <HeroBanner
                 items={animeHeroPool}
@@ -894,7 +578,7 @@ export default function App() {
                         setSelectedGenre('all');
                         setSelectedSortBy('popularity.desc');
                       }}
-                      className="nf-btn px-3.5 py-2 rounded-xl bg-white/10 hover:bg-[#E50914] text-xs font-extrabold text-white animate-capsule-icon"
+                      className="px-3.5 py-2 rounded-xl bg-white/10 hover:bg-[#E50914] text-xs font-extrabold text-white transition"
                     >
                       Ver Todo
                     </button>
@@ -908,7 +592,7 @@ export default function App() {
                   <button
                     key={g.id}
                     onClick={() => setSelectedGenre(g.value)}
-                    className={`nf-pill px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap border flex items-center gap-1.5 ${
+                    className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all border flex items-center gap-1.5 ${
                       selectedGenre === g.value
                         ? 'bg-[#E50914] text-white border-red-400 shadow-lg shadow-red-950/50 scale-105'
                         : 'bg-[#181818]/90 hover:bg-neutral-800 text-neutral-300 border-white/[0.08]'
@@ -1051,7 +735,7 @@ export default function App() {
             )}
           </div>
         ) : activeTab === 'search' ? (
-          <div className="pt-24 sm:pt-28 px-4 sm:px-8 lg:px-12 max-w-[1480px] mx-auto animate-nfPageEnter">
+          <div className="pt-24 sm:pt-28 px-4 sm:px-8 lg:px-12 max-w-[1480px] mx-auto animate-fadeIn">
             <h1 className="text-2xl font-extrabold mb-6 flex items-center gap-2">
               <span>Resultados para:</span>
               <span className="text-[#E50914] font-black italic">"{searchQuery}"</span>
@@ -1081,7 +765,7 @@ export default function App() {
           </div>
         ) : activeTab === 'movies' ? (
           /* PESTAÑA: PELÍCULAS CON SELECTOR DE GÉNEROS PERSONALIZADO ESTILO NETFLIX */
-          <div className="pb-16 animate-nfPageEnter">
+          <div className="pb-16">
             {moviesHeroPool.length > 0 && (
               <HeroBanner
                 items={moviesHeroPool}
@@ -1135,7 +819,7 @@ export default function App() {
                         setSelectedGenre('all');
                         setSelectedSortBy('popularity.desc');
                       }}
-                      className="nf-btn px-3.5 py-2 rounded-xl bg-white/10 hover:bg-[#E50914] text-xs font-extrabold text-white animate-capsule-icon"
+                      className="px-3.5 py-2 rounded-xl bg-white/10 hover:bg-[#E50914] text-xs font-extrabold text-white transition"
                     >
                       Ver Todo
                     </button>
@@ -1149,7 +833,7 @@ export default function App() {
                   <button
                     key={g.id}
                     onClick={() => setSelectedGenre(g.value)}
-                    className={`nf-pill px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap border flex items-center gap-1.5 ${
+                    className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all border flex items-center gap-1.5 ${
                       selectedGenre === g.value
                         ? 'bg-[#E50914] text-white border-red-400 shadow-lg shadow-red-950/50 scale-105'
                         : 'bg-[#181818]/90 hover:bg-neutral-800 text-neutral-300 border-white/[0.08]'
@@ -1303,7 +987,7 @@ export default function App() {
           </div>
         ) : activeTab === 'series' ? (
           /* PESTAÑA: SERIES DE TV CON SELECTOR DE GÉNEROS PERSONALIZADO ESTILO NETFLIX */
-          <div className="pb-16 animate-nfPageEnter">
+          <div className="pb-16">
             {seriesHeroPool.length > 0 && (
               <HeroBanner
                 items={seriesHeroPool}
@@ -1365,7 +1049,7 @@ export default function App() {
                         setSelectedNetwork('all');
                         setSelectedSortBy('popularity.desc');
                       }}
-                      className="nf-btn px-3.5 py-2 rounded-xl bg-white/10 hover:bg-[#E50914] text-xs font-extrabold text-white animate-capsule-icon"
+                      className="px-3.5 py-2 rounded-xl bg-white/10 hover:bg-[#E50914] text-xs font-extrabold text-white transition"
                     >
                       Ver Todo
                     </button>
@@ -1379,7 +1063,7 @@ export default function App() {
                   <button
                     key={g.id}
                     onClick={() => setSelectedGenre(g.value)}
-                    className={`nf-pill px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap border flex items-center gap-1.5 ${
+                    className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all border flex items-center gap-1.5 ${
                       selectedGenre === g.value
                         ? 'bg-[#E50914] text-white border-red-400 shadow-lg shadow-red-950/50 scale-105'
                         : 'bg-[#181818]/90 hover:bg-neutral-800 text-neutral-300 border-white/[0.08]'
@@ -1531,7 +1215,7 @@ export default function App() {
           </div>
         ) : (
           /* PESTAÑA: INICIO (HOME CON MOTOR ALGORÍTMICO DE RECOMENDACIÓN Y TAQUILLA) */
-          <div className="animate-nfPageEnter">
+          <>
             {homeHeroPool.length > 0 ? (
               <HeroBanner
                 items={homeHeroPool}
@@ -1695,7 +1379,7 @@ export default function App() {
               />
               <DiscoveryRows specs={homeRowSpecs} lang={tmdbLang} mediaProps={expandedMediaProps} />
             </div>
-          </div>
+          </>
         )}
       </main>
 

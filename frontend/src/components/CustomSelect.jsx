@@ -1,8 +1,11 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronDown, Check, Search, X } from 'lucide-react';
 
 /**
- * CustomSelect — Selector desplegable con estética y movimiento estilo Netflix
+ * CustomSelect — Selector desplegable con estética Netflix y Portal flotante (z-[9999])
+ * Reemplaza las etiquetas nativas <select> y <option> y evita cualquier colisión de stacking context
+ * con barras con backdrop-blur, píldoras con transform: scale() o tarjetas.
  */
 export default function CustomSelect({
   options = [],
@@ -21,7 +24,9 @@ export default function CustomSelect({
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [highlightedIdx, setHighlightedIdx] = useState(0);
+  const [menuStyle, setMenuStyle] = useState({});
   const containerRef = useRef(null);
+  const menuRef = useRef(null);
   const searchInputRef = useRef(null);
 
   const normalizedOptions = useMemo(() => {
@@ -59,8 +64,57 @@ export default function CustomSelect({
   }, [normalizedOptions, searchable, searchTerm]);
 
   useEffect(() => {
+    if (!isOpen) return;
+
+    const updatePosition = () => {
+      if (!containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const viewportW = window.innerWidth;
+      const viewportH = window.innerHeight;
+      const spaceBelow = viewportH - rect.bottom;
+      const openUpward = spaceBelow < 270 && rect.top > 290;
+
+      const style = {
+        position: 'fixed',
+        minWidth: `${Math.max(240, Math.round(rect.width))}px`,
+        maxWidth: 'min(92vw, 480px)',
+        zIndex: 9999,
+      };
+
+      if (menuClassName.includes('w-full')) {
+        style.width = `${Math.round(rect.width)}px`;
+      }
+
+      if (align === 'right') {
+        style.right = `${Math.max(8, Math.round(viewportW - rect.right))}px`;
+      } else {
+        style.left = `${Math.max(8, Math.min(Math.round(rect.left), viewportW - 260))}px`;
+      }
+
+      if (openUpward) {
+        style.bottom = `${Math.round(viewportH - rect.top + 6)}px`;
+      } else {
+        style.top = `${Math.round(rect.bottom + 6)}px`;
+      }
+
+      setMenuStyle(style);
+    };
+
+    updatePosition();
+    window.addEventListener('scroll', updatePosition, true);
+    window.addEventListener('resize', updatePosition);
+    return () => {
+      window.removeEventListener('scroll', updatePosition, true);
+      window.removeEventListener('resize', updatePosition);
+    };
+  }, [isOpen, align, menuClassName]);
+
+  useEffect(() => {
+    if (!isOpen) return;
     const handleClickOutside = (event) => {
-      if (containerRef.current && !containerRef.current.contains(event.target)) {
+      const inTrigger = containerRef.current && containerRef.current.contains(event.target);
+      const inMenu = menuRef.current && menuRef.current.contains(event.target);
+      if (!inTrigger && !inMenu) {
         setIsOpen(false);
         setSearchTerm('');
       }
@@ -79,7 +133,7 @@ export default function CustomSelect({
       document.removeEventListener('mousedown', handleClickOutside);
       document.removeEventListener('keydown', handleEscape);
     };
-  }, []);
+  }, [isOpen]);
 
   useEffect(() => {
     if (isOpen && searchable && searchInputRef.current) {
@@ -121,27 +175,135 @@ export default function CustomSelect({
   };
 
   const sizeClasses = {
-    sm: 'px-2.5 py-1 text-[11px] gap-1.5 rounded-lg',
-    md: 'px-3.5 py-2 text-xs gap-2 rounded-xl',
-    lg: 'px-4 py-2.5 text-sm gap-2.5 rounded-2xl',
+    sm: 'px-2.5 py-1 text-[11px] gap-1.5 rounded-[4px]',
+    md: 'px-3.5 py-2 text-xs gap-2 rounded-[4px]',
+    lg: 'px-4 py-2.5 text-sm gap-2.5 rounded-[4px]',
   };
 
   const variantClasses = {
     default: isOpen
-      ? 'bg-[#161616]/95 border-[#E50914] text-white shadow-[0_0_20px_rgba(229,9,20,0.28)]'
-      : 'bg-[#141414]/90 hover:bg-[#1d1d1d] border-white/15 hover:border-white/35 text-white shadow-lg',
+      ? 'bg-black/95 border-white text-white shadow-[0_8px_28px_rgba(0,0,0,0.85)]'
+      : 'bg-black/80 hover:bg-black/95 border-white/30 hover:border-white/75 text-white shadow-md',
     red: isOpen
       ? 'bg-[#E50914] border-red-300 text-white shadow-[0_0_24px_rgba(229,9,20,0.5)]'
       : 'bg-[#E50914]/20 hover:bg-[#E50914]/30 border-[#E50914]/50 text-white',
     pill: isOpen
-      ? 'bg-[#161616]/95 border-[#E50914] text-white rounded-full shadow-[0_0_20px_rgba(229,9,20,0.3)]'
-      : 'bg-black/75 hover:bg-neutral-900/95 border-white/15 hover:border-white/35 text-white rounded-full shadow-md',
+      ? 'bg-black/95 border-white text-white rounded-full shadow-[0_8px_28px_rgba(0,0,0,0.85)]'
+      : 'bg-black/75 hover:bg-neutral-900/95 border-white/25 hover:border-white/60 text-white rounded-full shadow-md',
   };
+
+  const dropdownMenu =
+    isOpen && typeof document !== 'undefined'
+      ? createPortal(
+          <div
+            ref={menuRef}
+            style={menuStyle}
+            onClick={(e) => e.stopPropagation()}
+            className={`font-netflix select-none bg-[#141414]/98 backdrop-blur-2xl border border-white/20 rounded-md shadow-[0_28px_70px_rgba(0,0,0,0.96)] p-1.5 animate-fadeIn ${menuClassName}`}
+          >
+            {(searchable || normalizedOptions.length > 8) && (
+              <div className="p-1.5 pb-2 border-b border-white/10 mb-1">
+                <div className="relative flex items-center">
+                  <Search className="w-3.5 h-3.5 text-neutral-400 absolute left-2.5 pointer-events-none" />
+                  <input
+                    ref={searchInputRef}
+                    type="text"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    placeholder="Filtrar opción..."
+                    className="w-full bg-black border border-white/20 focus:border-white rounded-[4px] pl-8 pr-7 py-1.5 text-xs text-white placeholder-neutral-500 focus:outline-none font-netflix"
+                  />
+                  {searchTerm && (
+                    <button
+                      type="button"
+                      onClick={() => setSearchTerm('')}
+                      className="absolute right-2 text-neutral-400 hover:text-white"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div role="listbox" className="max-h-64 overflow-y-auto space-y-0.5 pr-0.5">
+              {filteredOptions.length === 0 ? (
+                <div className="px-3 py-4 text-center text-xs text-neutral-500">
+                  Sin coincidencias
+                </div>
+              ) : (
+                filteredOptions.map((opt, idx) => {
+                  const isSelected = String(opt.value) === String(value);
+                  const isHighlighted = idx === highlightedIdx;
+
+                  return (
+                    <button
+                      key={String(opt.value)}
+                      type="button"
+                      role="option"
+                      aria-selected={isSelected}
+                      onMouseEnter={() => setHighlightedIdx(idx)}
+                      onClick={() => handleSelect(opt.value)}
+                      className={`w-full text-left px-3 py-2 rounded-[4px] transition-colors duration-150 flex items-center justify-between gap-3 ${
+                        isSelected
+                          ? 'bg-white/[0.12] border-l-2 border-[#E50914] text-white'
+                          : isHighlighted
+                          ? 'bg-white/[0.08] text-white'
+                          : 'text-neutral-300 hover:bg-white/[0.06] hover:text-white'
+                      }`}
+                    >
+                      <div className="flex items-start gap-2.5 min-w-0">
+                        {opt.icon && (
+                          <span className="text-sm leading-none mt-0.5 shrink-0">{opt.icon}</span>
+                        )}
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span
+                              className={`text-xs truncate ${
+                                isSelected ? 'font-bold text-white' : 'font-medium'
+                              }`}
+                            >
+                              {opt.label}
+                            </span>
+                            {opt.badge && (
+                              <span
+                                className={`text-[9px] px-1.5 py-0.2 rounded-[2px] font-bold uppercase tracking-wider shrink-0 ${
+                                  isSelected
+                                    ? 'bg-[#E50914] text-white'
+                                    : 'bg-white/10 text-neutral-300 border border-white/15'
+                                }`}
+                              >
+                                {opt.badge}
+                              </span>
+                            )}
+                          </div>
+                          {opt.description && (
+                            <p className="text-[11px] text-neutral-400 mt-0.5 leading-snug line-clamp-1 font-normal">
+                              {opt.description}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      {isSelected && (
+                        <Check className="w-4 h-4 text-white shrink-0 stroke-[2.5]" />
+                      )}
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>,
+          document.body
+        )
+      : null;
 
   return (
     <div
       ref={containerRef}
-      className={`relative inline-block text-left select-none font-netflix ${isOpen ? 'z-[60]' : ''} ${className}`}
+      className={`relative inline-block text-left select-none font-netflix ${
+        isOpen ? 'z-50' : ''
+      } ${className}`}
     >
       <button
         type="button"
@@ -149,144 +311,34 @@ export default function CustomSelect({
         onKeyDown={handleKeyDown}
         aria-haspopup="listbox"
         aria-expanded={isOpen}
-        className={`nf-btn w-full flex items-center justify-between font-bold border backdrop-blur-2xl focus:outline-none ${
+        className={`w-full flex items-center justify-between font-semibold border transition-all duration-150 focus:outline-none ${
           sizeClasses[size] || sizeClasses.md
         } ${variantClasses[variant] || variantClasses.default}`}
       >
         <div className="flex items-center gap-2 min-w-0 truncate">
-          {LeadingIcon && (
-            <LeadingIcon className="w-3.5 h-3.5 text-[#E50914] shrink-0" />
-          )}
-          {label && (
-            <span className="text-neutral-400 font-semibold shrink-0">{label}:</span>
-          )}
+          {LeadingIcon && <LeadingIcon className="w-3.5 h-3.5 text-[#E50914] shrink-0" />}
+          {label && <span className="text-neutral-400 font-normal shrink-0">{label}:</span>}
           {selectedOption?.icon && (
             <span className="shrink-0 leading-none">{selectedOption.icon}</span>
           )}
-          <span className="truncate font-extrabold tracking-tight">
+          <span className="truncate font-bold tracking-tight">
             {selectedOption ? selectedOption.label : placeholder}
           </span>
           {selectedOption?.badge && (
-            <span className="px-1.5 py-0.2 rounded bg-[#E50914]/25 border border-[#E50914]/40 text-red-200 text-[9px] font-black uppercase tracking-wider shrink-0">
+            <span className="px-1.5 py-0.2 rounded-[2px] bg-[#E50914] text-white text-[9px] font-bold uppercase tracking-wider shrink-0">
               {selectedOption.badge}
             </span>
           )}
         </div>
 
         <ChevronDown
-          className={`w-3.5 h-3.5 text-neutral-400 shrink-0 transition-transform duration-300 ease-nf-out ${
-            isOpen ? 'rotate-180 text-[#E50914]' : ''
+          className={`w-3.5 h-3.5 text-neutral-300 shrink-0 transition-transform duration-200 ${
+            isOpen ? 'rotate-180 text-white' : ''
           }`}
         />
       </button>
 
-      {isOpen && (
-        <div
-          className={`absolute z-[70] mt-2 min-w-[230px] w-max max-w-[90vw] bg-[#101010]/98 backdrop-blur-2xl border border-white/20 ring-1 ring-[#E50914]/30 rounded-2xl shadow-[0_24px_65px_rgba(0,0,0,0.95)] p-1.5 ${
-            align === 'right' ? 'right-0 animate-nfDropdown' : 'left-0 animate-nfDropdownLeft'
-          } ${menuClassName}`}
-        >
-          {(searchable || normalizedOptions.length > 8) && (
-            <div className="p-1.5 pb-2 border-b border-white/10 mb-1">
-              <div className="relative flex items-center">
-                <Search className="w-3.5 h-3.5 text-neutral-400 absolute left-2.5 pointer-events-none" />
-                <input
-                  ref={searchInputRef}
-                  type="text"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="Filtrar opción..."
-                  className="w-full bg-black/70 border border-white/15 focus:border-[#E50914] rounded-xl pl-8 pr-7 py-1.5 text-xs text-white placeholder-neutral-500 focus:outline-none transition-colors"
-                />
-                {searchTerm && (
-                  <button
-                    type="button"
-                    onClick={() => setSearchTerm('')}
-                    className="nf-icon-btn absolute right-2 text-neutral-400 hover:text-white"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-
-          <div
-            role="listbox"
-            className="max-h-64 overflow-y-auto space-y-1 pr-0.5"
-          >
-            {filteredOptions.length === 0 ? (
-              <div className="px-3 py-4 text-center text-xs text-neutral-500 animate-fadeIn">
-                Sin coincidencias
-              </div>
-            ) : (
-              filteredOptions.map((opt, idx) => {
-                const isSelected = String(opt.value) === String(value);
-                const isHighlighted = idx === highlightedIdx;
-
-                return (
-                  <button
-                    key={String(opt.value)}
-                    type="button"
-                    role="option"
-                    aria-selected={isSelected}
-                    onMouseEnter={() => setHighlightedIdx(idx)}
-                    onClick={() => handleSelect(opt.value)}
-                    className={`w-full text-left px-3 py-2 rounded-xl transition-all duration-200 ease-nf-out flex items-center justify-between gap-3 ${
-                      isSelected
-                        ? 'bg-gradient-to-r from-[#E50914]/30 via-[#E50914]/15 to-transparent border border-[#E50914]/60 text-white shadow-[0_0_15px_rgba(229,9,20,0.2)]'
-                        : isHighlighted
-                        ? 'bg-white/[0.08] text-white border border-transparent translate-x-0.5'
-                        : 'text-neutral-300 hover:bg-white/[0.06] hover:text-white hover:translate-x-0.5 border border-transparent'
-                    }`}
-                  >
-                    <div className="flex items-start gap-2.5 min-w-0">
-                      {opt.icon && (
-                        <span className="text-sm leading-none mt-0.5 shrink-0">
-                          {opt.icon}
-                        </span>
-                      )}
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <span
-                            className={`text-xs truncate ${
-                              isSelected ? 'font-black text-white' : 'font-bold'
-                            }`}
-                          >
-                            {opt.label}
-                          </span>
-                          {opt.badge && (
-                            <span
-                              className={`text-[9px] px-1.5 py-0.2 rounded font-extrabold uppercase tracking-wider shrink-0 ${
-                                isSelected
-                                  ? 'bg-[#E50914] text-white'
-                                  : 'bg-white/10 text-neutral-300'
-                              }`}
-                            >
-                              {opt.badge}
-                            </span>
-                          )}
-                        </div>
-                        {opt.description && (
-                          <p className="text-[10px] text-neutral-400 mt-0.5 leading-snug line-clamp-1">
-                            {opt.description}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-
-                    {isSelected && (
-                      <span className="w-5 h-5 rounded-full bg-[#E50914] text-white flex items-center justify-center shrink-0 shadow-[0_0_10px_#E50914] animate-nfCheckPop">
-                        <Check className="w-3 h-3 stroke-[3]" />
-                      </span>
-                    )}
-                  </button>
-                );
-              })
-            )}
-          </div>
-        </div>
-      )}
+      {dropdownMenu}
     </div>
   );
 }

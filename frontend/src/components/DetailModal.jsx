@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import api from '../services/api.js';
 import CustomSelect from './CustomSelect.jsx';
 import {
@@ -16,9 +16,11 @@ import {
   RotateCcw,
   Layers,
   Download,
+  Sparkles,
 } from 'lucide-react';
 import { LANGUAGE_OPTIONS } from '../hooks/useUserMedia.js';
 import { getContentRating } from '../utils/contentRating.js';
+import useOfflineDownloads from '../hooks/useOfflineDownloads.js';
 
 function formatRuntime(mins) {
   if (!mins || !Number.isFinite(mins)) return '';
@@ -33,6 +35,32 @@ function getAgeDescription(ageRating) {
   if (!Number.isFinite(num)) return '';
   return `Apta para mayores de ${num} años`;
 }
+
+const OFFLINE_QUALITY_OPTIONS = [
+  {
+    id: 'marathon',
+    value: 'marathon',
+    label: 'Temporada Completa · 576p HQ (~80-130 MB/ep)',
+    icon: '⚡',
+    badge: 'NETFLIX SAVER',
+    description: 'Fórmula Per-Title para bajar temporadas enteras sin pestañear y con nitidez Lanczos',
+  },
+  {
+    id: 'compact',
+    value: 'compact',
+    label: 'Compacta Perceptual · 720p HD (~140-230 MB)',
+    icon: '🎬',
+    badge: 'PERCEPTUAL HD',
+    description: 'Compresión psicovisual AQ-3 + Denoise sin pérdida visual en pantallas grandes',
+  },
+  {
+    id: 'original',
+    value: 'original',
+    label: 'Original Directo · Sin recomprimir (hasta 2 GB)',
+    icon: '💎',
+    description: 'Guarda el archivo MP4/WebM de origen intacto',
+  },
+];
 
 export default function DetailModal({
   item,
@@ -56,63 +84,6 @@ export default function DetailModal({
   const [userReaction, setUserReaction] = useState(null); // 'dislike' | 'like' | 'love' | null
   const [rateMenuOpen, setRateMenuOpen] = useState(false);
   const [rateAnim, setRateAnim] = useState(null);
-  const [isClosing, setIsClosing] = useState(false);
-  const [downloadOpen, setDownloadOpen] = useState(false);
-  const [downloadClosing, setDownloadClosing] = useState(false);
-  const closeTimerRef = useRef(null);
-  const downloadCloseTimerRef = useRef(null);
-
-  const closeDownloadModal = useCallback(() => {
-    if (downloadClosing) return;
-    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
-      setDownloadOpen(false);
-      return;
-    }
-    setDownloadClosing(true);
-    if (downloadCloseTimerRef.current) clearTimeout(downloadCloseTimerRef.current);
-    downloadCloseTimerRef.current = setTimeout(() => {
-      setDownloadOpen(false);
-      setDownloadClosing(false);
-    }, 280);
-  }, [downloadClosing]);
-
-  const handleRequestClose = useCallback(() => {
-    if (isClosing) return;
-    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
-      onClose?.();
-      return;
-    }
-    const frame = trailerFrameRef.current;
-    if (frame?.contentWindow) {
-      try {
-        frame.contentWindow.postMessage(
-          JSON.stringify({ event: 'command', func: 'mute', args: [] }),
-          '*'
-        );
-      } catch {}
-    }
-    setIsClosing(true);
-    if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
-    closeTimerRef.current = setTimeout(() => {
-      onClose?.();
-    }, 290);
-  }, [isClosing, onClose]);
-
-  useEffect(() => {
-    return () => {
-      if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
-      if (downloadCloseTimerRef.current) clearTimeout(downloadCloseTimerRef.current);
-    };
-  }, []);
-  const [downloadSources, setDownloadSources] = useState([]);
-  const [downloadLoading, setDownloadLoading] = useState(false);
-  const [downloadBusy, setDownloadBusy] = useState(false);
-  const [downloadError, setDownloadError] = useState('');
-  const [downloadSuccess, setDownloadSuccess] = useState('');
-  const [downloadIndex, setDownloadIndex] = useState(0);
-  const [downloadUrl, setDownloadUrl] = useState('');
-  const [downloadQuality, setDownloadQuality] = useState('compact');
-  const [downloadEpisode, setDownloadEpisode] = useState(1);
   const rateCloseTimerRef = useRef(null);
 
   const trailerFrameRef = useRef(null);
@@ -126,6 +97,7 @@ export default function DetailModal({
     Boolean(item?.name && !item?.title);
 
   const mediaType = isTv ? 'tv' : 'movie';
+  const { downloadOpen, setDownloadOpen, downloadSources, downloadLoading, downloadBusy, seasonBatchBusy, seasonBatchProgress, downloadError, downloadSuccess, downloadIndex, setDownloadIndex, downloadUrl, setDownloadUrl, downloadQuality, setDownloadQuality, downloadEpisode, setDownloadEpisode, loadDownloadSources, openEpisodeDownloadModal, startOfflineDownload, startFullSeasonDownload, sourceSelectOptions } = useOfflineDownloads({ item, details, mediaType, isTv, selectedSeason, episodes, preferredLanguage });
   const currentLangObj =
     LANGUAGE_OPTIONS.find((l) => l.id === preferredLanguage) || LANGUAGE_OPTIONS[0];
 
@@ -171,7 +143,6 @@ export default function DetailModal({
   useEffect(() => {
     if (!item?.id) return;
     let isMounted = true;
-    setIsClosing(false);
     setDetails(null);
     setCollection(null);
     setTrailerKey(null);
@@ -231,17 +202,14 @@ export default function DetailModal({
     };
   }, [isTv, item?.id, selectedSeason, currentLangObj.tmdbLang]);
 
-  // Escape para cerrar con animación inversa
+  // Escape para cerrar
   useEffect(() => {
     const onKeyDown = (e) => {
-      if (e.key === 'Escape') {
-        if (downloadOpen) closeDownloadModal();
-        else handleRequestClose();
-      }
+      if (e.key === 'Escape') onClose?.();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [downloadOpen, closeDownloadModal, handleRequestClose]);
+  }, [onClose]);
 
   const toggleTrailerMute = () => {
     const nextMuted = !isTrailerMuted;
@@ -318,47 +286,15 @@ export default function DetailModal({
     }
   };
 
-  const loadDownloadSources = async (episode = downloadEpisode) => {
-    setDownloadLoading(true);
-    setDownloadError('');
-    setDownloadSources([]);
-    setDownloadIndex(0);
-    try {
-      const data = await api.resolveSource({ tmdbId: item.id, imdbId: details?.imdb_id || item.imdb_id, type: mediaType, season: isTv ? selectedSeason : undefined, episode: isTv ? episode : undefined, preferredLanguage });
-      const found = (data.streams || []).filter(stream => stream.infoHash || (stream.url && /^https:\/\//i.test(stream.url) && /\.(mp4|webm)(?:[?#]|$)/i.test(stream.url)));
-      setDownloadSources(found.slice(0, 40));
-      if (!found.length) setDownloadError('No hay una fuente descargable para este título. Puedes usar un enlace directo MP4/WebM disponible para ti.');
-    } catch (error) { setDownloadError(error.response?.data?.error || 'No se pudieron consultar las fuentes.'); }
-    finally { setDownloadLoading(false); }
-  };
-
-  const startOfflineDownload = async () => {
-    setDownloadBusy(true);
-    setDownloadError('');
-    setDownloadSuccess('');
-    const chosen = downloadUrl.trim() ? { url: downloadUrl.trim() } : downloadSources[downloadIndex];
-    try {
-      if (!chosen) throw new Error('Selecciona una fuente o pega un enlace directo.');
-      const source = chosen.infoHash ? { infoHash: chosen.infoHash, fileIdx: chosen.fileIdx, season: isTv ? selectedSeason : undefined, episode: isTv ? downloadEpisode : undefined } : { url: chosen.url };
-      await api.startDownload(source, isTv ? `${title} · T${selectedSeason}:E${downloadEpisode}` : title, downloadQuality);
-      setDownloadSuccess('Descarga iniciada. Puedes seguirla en la sección Descargas.');
-    } catch (error) { setDownloadError(error.response?.data?.error || error.message || 'No se pudo iniciar la descarga.'); }
-    finally { setDownloadBusy(false); }
-  };
-
   return (
     <div
-      className={`fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-start justify-center overflow-y-auto p-2 sm:p-6 ${
-        isClosing ? 'animate-nfBackdropOut pointer-events-none' : 'animate-nfBackdrop'
-      }`}
-      onClick={handleRequestClose}
+      className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-start justify-center overflow-y-auto p-2 sm:p-6 animate-fadeIn"
+      onClick={onClose}
     >
       <div
         ref={modalBodyRef}
         onClick={(e) => e.stopPropagation()}
-        className={`relative w-full max-w-[920px] my-4 sm:my-8 bg-[#181818] rounded-xl overflow-hidden shadow-[0_30px_90px_rgba(0,0,0,0.95)] border border-white/10 text-white ${
-          isClosing ? 'animate-modalSlideDown' : 'animate-modalSlideUp'
-        }`}
+        className="relative w-full max-w-[920px] my-4 sm:my-8 bg-[#181818] rounded-xl overflow-hidden shadow-[0_30px_90px_rgba(0,0,0,0.95)] border border-white/10 text-white animate-modalSlideUp"
       >
         {/* 1. HERO CON TRÁILER AUTOMÁTICO EN SILENCIO */}
         <div className="relative w-full aspect-video max-h-[520px] bg-black overflow-hidden">
@@ -366,7 +302,7 @@ export default function DetailModal({
             <img
               src={backdropUrl}
               alt={title}
-              className="w-full h-full object-cover animate-heroBackdrop"
+              className="w-full h-full object-cover"
             />
           )}
 
@@ -378,19 +314,19 @@ export default function DetailModal({
               title={`Tráiler de ${title}`}
               tabIndex={-1}
               aria-hidden="true"
-              className="absolute inset-0 w-full h-full scale-[1.28] pointer-events-none select-none border-0 animate-fadeIn"
+              className="absolute inset-0 w-full h-full scale-[1.28] pointer-events-none select-none border-0"
               allow="autoplay; encrypted-media"
             />
           )}
 
           <div className="absolute inset-0 z-10 bg-gradient-to-t from-[#181818] via-[#181818]/25 to-black/35" />
 
-          {/* Botón Cerrar con rotación elástica */}
+          {/* Botón Cerrar */}
           <button
             type="button"
-            onClick={handleRequestClose}
+            onClick={onClose}
             aria-label="Cerrar vista previa"
-            className="nf-icon-btn absolute top-4 right-4 z-20 w-9 h-9 rounded-full bg-[#181818]/90 hover:bg-[#E50914] text-white flex items-center justify-center border border-white/15 hover:rotate-90"
+            className="absolute top-4 right-4 z-20 w-9 h-9 rounded-full bg-[#181818]/90 hover:bg-[#2a2a2a] text-white flex items-center justify-center border border-white/15 transition"
           >
             <X className="w-5 h-5" />
           </button>
@@ -398,11 +334,11 @@ export default function DetailModal({
           {/* Título + Botones de Acción (Reproducir / + o ✓ / Calificación / Mute) */}
           <div className="absolute bottom-6 left-6 right-6 z-20 flex items-end justify-between gap-4">
             <div className="space-y-4 max-w-xl">
-              <h1 className="text-2xl sm:text-4xl font-black text-white tracking-tight drop-shadow-[0_4px_16px_rgba(0,0,0,0.9)] leading-tight animate-heroStagger-2">
+              <h1 className="text-2xl sm:text-4xl font-black text-white tracking-tight drop-shadow-[0_4px_16px_rgba(0,0,0,0.9)] leading-tight">
                 {title}
               </h1>
 
-              <div className="flex flex-wrap items-center gap-2.5 animate-heroStagger-3">
+              <div className="flex flex-wrap items-center gap-2.5">
                 <button
                   type="button"
                   onClick={() =>
@@ -414,7 +350,7 @@ export default function DetailModal({
                       preferredLanguage
                     )
                   }
-                  className="hero-primary-cta flex items-center gap-2 px-6 py-2.5 bg-white hover:bg-neutral-200 text-black font-bold text-sm sm:text-base rounded-[4px] shadow-lg"
+                  className="flex items-center gap-2 px-6 py-2.5 bg-white hover:bg-neutral-200 text-black font-bold text-sm sm:text-base rounded-[4px] shadow-lg transition active:scale-95"
                 >
                   <Play className="w-5 h-5 fill-current" />
                   <span>
@@ -438,7 +374,7 @@ export default function DetailModal({
                         preferredLanguage
                       )
                     }
-                    className="nf-btn flex items-center gap-1.5 px-3.5 py-2.5 bg-neutral-800/90 hover:bg-neutral-700 text-white font-semibold text-xs sm:text-sm rounded-[4px] border border-white/20"
+                    className="flex items-center gap-1.5 px-3.5 py-2.5 bg-neutral-800/90 hover:bg-neutral-700 text-white font-semibold text-xs sm:text-sm rounded-[4px] border border-white/20 transition"
                     title="Reproducir desde el inicio"
                   >
                     <RotateCcw className="w-4 h-4" />
@@ -448,8 +384,13 @@ export default function DetailModal({
 
                 <button
                   type="button"
-                  onClick={() => { setDownloadOpen(true); setDownloadEpisode(savedEntry?.episode || 1); setDownloadSuccess(''); setDownloadUrl(''); void loadDownloadSources(savedEntry?.episode || 1); }}
-                  className="nf-btn flex items-center gap-1.5 px-3.5 py-2.5 bg-neutral-800/90 hover:bg-neutral-700 text-white font-semibold text-xs sm:text-sm rounded-[4px] border border-white/20"
+                  onClick={() =>
+                    openEpisodeDownloadModal(
+                      savedEntry?.episode || 1,
+                      isTv ? 'marathon' : 'compact'
+                    )
+                  }
+                  className="flex items-center gap-1.5 px-3.5 py-2.5 bg-neutral-800/90 hover:bg-neutral-700 text-white font-semibold text-xs sm:text-sm rounded-[4px] border border-white/20 transition"
                   title="Guardar para ver sin conexión"
                 >
                   <Download className="w-4 h-4" />
@@ -461,9 +402,9 @@ export default function DetailModal({
                     type="button"
                     onClick={() => onToggleWatchlist(item)}
                     title={inWatchlist ? 'Quitar de Mi lista' : 'Agregar a Mi lista'}
-                    className="nf-icon-btn w-10 h-10 rounded-full border-2 border-white/50 hover:border-white bg-[#2a2a2a]/70 text-white flex items-center justify-center"
+                    className="w-10 h-10 rounded-full border-2 border-white/50 hover:border-white bg-[#2a2a2a]/70 text-white flex items-center justify-center transition"
                   >
-                    {inWatchlist ? <Check className="w-5 h-5 animate-nfCheckPop" /> : <Plus className="w-5 h-5" />}
+                    {inWatchlist ? <Check className="w-5 h-5" /> : <Plus className="w-5 h-5" />}
                   </button>
                 )}
 
@@ -480,7 +421,7 @@ export default function DetailModal({
                     type="button"
                     onClick={() => setRateMenuOpen((v) => !v)}
                     title="Calificar título"
-                    className={`nf-icon-btn relative w-10 h-10 rounded-full border-2 flex items-center justify-center ${
+                    className={`relative w-10 h-10 rounded-full border-2 flex items-center justify-center transition ${
                       userReaction
                         ? 'border-white bg-white/15 text-white'
                         : 'border-white/50 hover:border-white bg-[#2a2a2a]/70 text-white'
@@ -526,7 +467,7 @@ export default function DetailModal({
                         onClick={() => handleSetReaction('dislike')}
                         title="No es para mí"
                         style={{ animationDelay: '0.02s' }}
-                        className={`nf-icon-btn w-9 h-9 rounded-full flex items-center justify-center hover:bg-white/15 animate-capsule-icon ${
+                        className={`w-9 h-9 rounded-full flex items-center justify-center transition hover:bg-white/15 animate-capsule-icon ${
                           userReaction === 'dislike' ? 'text-white' : 'text-neutral-200'
                         }`}
                       >
@@ -542,7 +483,7 @@ export default function DetailModal({
                         onClick={() => handleSetReaction('like')}
                         title="Me gusta"
                         style={{ animationDelay: '0.05s' }}
-                        className={`nf-icon-btn relative w-9 h-9 rounded-full flex items-center justify-center hover:bg-white/15 animate-capsule-icon ${
+                        className={`relative w-9 h-9 rounded-full flex items-center justify-center transition hover:bg-white/15 animate-capsule-icon ${
                           userReaction === 'like' ? 'text-white' : 'text-neutral-200'
                         }`}
                       >
@@ -561,7 +502,7 @@ export default function DetailModal({
                         onClick={() => handleSetReaction('love')}
                         title="¡Me encanta!"
                         style={{ animationDelay: '0.08s' }}
-                        className={`nf-icon-btn relative w-9 h-9 rounded-full flex items-center justify-center hover:bg-white/15 animate-capsule-icon ${
+                        className={`relative w-9 h-9 rounded-full flex items-center justify-center transition hover:bg-white/15 animate-capsule-icon ${
                           userReaction === 'love' ? 'text-white' : 'text-neutral-200'
                         }`}
                       >
@@ -602,9 +543,9 @@ export default function DetailModal({
                 onClick={toggleTrailerMute}
                 aria-label={isTrailerMuted ? 'Activar sonido del tráiler' : 'Silenciar tráiler'}
                 title={isTrailerMuted ? 'Activar sonido' : 'Silenciar'}
-                className="nf-icon-btn w-10 h-10 rounded-full border border-white/40 hover:border-white bg-[#181818]/75 text-white flex items-center justify-center shrink-0"
+                className="w-10 h-10 rounded-full border border-white/40 hover:border-white bg-[#181818]/75 text-white flex items-center justify-center transition shrink-0"
               >
-                {isTrailerMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4 animate-capsule-icon" />}
+                {isTrailerMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
               </button>
             )}
           </div>
@@ -657,7 +598,7 @@ export default function DetailModal({
                     <button
                       type="button"
                       onClick={() => aboutSectionRef.current?.scrollIntoView({ behavior: 'smooth' })}
-                      className="italic text-neutral-300 hover:text-white hover:underline ml-1 transition-colors"
+                      className="italic text-neutral-300 hover:underline ml-1"
                     >
                       , más
                     </button>
@@ -695,17 +636,28 @@ export default function DetailModal({
           {/* 3. EPISODIOS (SOLO PARA SERIES / ANIME) */}
           {isTv && (
             <div className="space-y-4 pt-2 border-t border-white/10">
-              <div className="flex items-center justify-between gap-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <h2 className="text-lg sm:text-xl font-bold text-white">Episodios</h2>
-                {seasonsCount > 1 && (
-                  <div className="w-44">
-                    <CustomSelect
-                      value={selectedSeason}
-                      onChange={(val) => setSelectedSeason(Number(val))}
-                      options={seasonOptions}
-                    />
-                  </div>
-                )}
+                <div className="flex items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => openEpisodeDownloadModal(1, 'marathon')}
+                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-[4px] bg-[#2a2a2a] hover:bg-[#3a3a3a] border border-white/25 text-white text-xs font-bold transition"
+                    title="Descargar temporada completa sin conexión"
+                  >
+                    <Download className="w-3.5 h-3.5 text-[#E50914]" />
+                    <span>Descargar Temporada {selectedSeason}</span>
+                  </button>
+                  {seasonsCount > 1 && (
+                    <div className="w-44">
+                      <CustomSelect
+                        value={selectedSeason}
+                        onChange={(val) => setSelectedSeason(Number(val))}
+                        options={seasonOptions}
+                      />
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div className="flex flex-wrap items-center gap-2 text-xs text-neutral-300">
@@ -723,19 +675,18 @@ export default function DetailModal({
               {loadingEpisodes ? (
                 <div className="space-y-3">
                   {[1, 2, 3].map((n) => (
-                    <div key={n} className="h-24 rounded bg-white/5 netflix-shimmer" />
+                    <div key={n} className="h-24 rounded bg-white/5 animate-pulse" />
                   ))}
                 </div>
               ) : (
-                <div key={`ep-list-${selectedSeason}`} className="divide-y divide-white/10 animate-nfTabContent">
+                <div className="divide-y divide-white/10">
                   {episodes.map((ep, idx) => {
                     const stillImg = ep.still_path
                       ? `https://image.tmdb.org/t/p/w300${ep.still_path}`
                       : backdropUrl;
                     return (
-                      <button
+                      <div
                         key={ep.id || ep.episode_number}
-                        type="button"
                         onClick={() =>
                           onPlay(
                             item,
@@ -745,44 +696,57 @@ export default function DetailModal({
                             preferredLanguage
                           )
                         }
-                        className={`episode-row w-full text-left flex items-center gap-4 sm:gap-5 px-4 sm:px-7 py-5 sm:py-6 rounded group ${
+                        className={`episode-row w-full text-left flex items-center gap-4 sm:gap-5 px-4 sm:px-7 py-5 sm:py-6 rounded transition group cursor-pointer ${
                           idx === 0 ? 'bg-[#333333]/80 hover:bg-[#3a3a3a]' : 'hover:bg-white/[0.06]'
                         }`}
                       >
-                        <span className="text-xl sm:text-2xl font-normal text-neutral-300 group-hover:text-white transition-colors w-7 text-center shrink-0">
+                        <span className="text-xl sm:text-2xl font-normal text-neutral-300 w-7 text-center shrink-0">
                           {ep.episode_number}
                         </span>
-                        <div className="relative w-32 sm:w-40 aspect-video rounded overflow-hidden bg-neutral-900 shrink-0 shadow-md">
+                        <div className="relative w-32 sm:w-40 aspect-video rounded overflow-hidden bg-neutral-900 shrink-0">
                           {stillImg && (
                             <img
                               src={stillImg}
                               alt={ep.name}
                               loading="lazy"
-                              className="w-full h-full object-cover transition-transform duration-500 ease-nf-out group-hover:scale-105"
+                              className="w-full h-full object-cover"
                             />
                           )}
-                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-250 flex items-center justify-center">
-                            <div className="w-9 h-9 rounded-full border border-white bg-black/65 flex items-center justify-center transform scale-75 group-hover:scale-100 transition-transform duration-300 ease-nf-spring shadow-lg">
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
+                            <div className="w-9 h-9 rounded-full border border-white bg-black/60 flex items-center justify-center">
                               <Play className="w-4 h-4 fill-white text-white ml-0.5" />
                             </div>
                           </div>
                         </div>
                         <div className="min-w-0 flex-1 space-y-1">
                           <div className="flex items-center justify-between gap-3">
-                            <h3 className="text-sm sm:text-[15px] font-bold text-white group-hover:text-red-300 transition-colors truncate">
+                            <h3 className="text-sm sm:text-[15px] font-bold text-white truncate">
                               {ep.name || `Episodio ${ep.episode_number}`}
                             </h3>
-                            {ep.runtime && (
-                              <span className="text-sm sm:text-[15px] text-white shrink-0 font-medium">
-                                {ep.runtime} min
-                              </span>
-                            )}
+                            <div className="flex items-center gap-2 shrink-0">
+                              {ep.runtime && (
+                                <span className="text-sm sm:text-[15px] text-white font-medium">
+                                  {ep.runtime} min
+                                </span>
+                              )}
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openEpisodeDownloadModal(ep.episode_number, 'marathon');
+                                }}
+                                title={`Descargar Episodio ${ep.episode_number}`}
+                                className="w-8 h-8 rounded-full bg-[#2a2a2a]/80 hover:bg-white/20 border border-white/25 hover:border-white text-neutral-200 hover:text-white flex items-center justify-center transition"
+                              >
+                                <Download className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
                           </div>
                           <p className="text-xs sm:text-[13px] text-neutral-300 line-clamp-3 leading-relaxed">
                             {ep.overview || 'Sin sinopsis disponible.'}
                           </p>
                         </div>
-                      </button>
+                      </div>
                     );
                   })}
                 </div>
@@ -811,7 +775,7 @@ export default function DetailModal({
                     <div
                       key={part.id}
                       onClick={() => openRelated(part)}
-                      className={`group rounded-md overflow-hidden bg-[#2f2f2f] cursor-pointer netflix-card-transition hover:ring-1 hover:ring-white/40 ${
+                      className={`group rounded-md overflow-hidden bg-[#2f2f2f] cursor-pointer transition hover:ring-1 hover:ring-white/40 ${
                         part.id === item.id ? 'ring-1 ring-[#E50914]' : ''
                       }`}
                     >
@@ -821,11 +785,11 @@ export default function DetailModal({
                             src={partImg}
                             alt={part.title}
                             loading="lazy"
-                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ease-nf-out"
+                            className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
                           />
                         )}
-                        <div className="absolute inset-0 bg-black/35 opacity-0 group-hover:opacity-100 transition-opacity duration-250 flex items-center justify-center">
-                          <div className="w-10 h-10 rounded-full border border-white bg-black/60 flex items-center justify-center transform scale-75 group-hover:scale-100 transition-transform duration-300 ease-nf-spring">
+                        <div className="absolute inset-0 bg-black/35 opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
+                          <div className="w-10 h-10 rounded-full border border-white bg-black/60 flex items-center justify-center">
                             <Play className="w-4 h-4 fill-white text-white ml-0.5" />
                           </div>
                         </div>
@@ -837,8 +801,8 @@ export default function DetailModal({
                       </div>
                       <div className="p-3.5 space-y-2">
                         <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-1.5 text-[11px] text-neutral-300 min-w-0">
-                            <span className="px-1 border border-white/35 rounded-[2px] text-[9px] font-bold shrink-0">
+                          <div className="flex items-center gap-1.5 text-[11px] text-neutral-300">
+                            <span className="px-1 border border-white/35 rounded-[2px] text-[9px] font-bold">
                               HD
                             </span>
                             <span className="font-semibold text-white truncate">{part.title}</span>
@@ -850,10 +814,10 @@ export default function DetailModal({
                                 e.stopPropagation();
                                 onToggleWatchlist(part);
                               }}
-                              className="nf-icon-btn w-7 h-7 rounded-full border border-white/50 hover:border-white flex items-center justify-center text-white shrink-0"
+                              className="w-7 h-7 rounded-full border border-white/50 hover:border-white flex items-center justify-center text-white shrink-0"
                               title={partInList ? 'Quitar de Mi lista' : 'Agregar a Mi lista'}
                             >
-                              {partInList ? <Check className="w-3.5 h-3.5 animate-nfCheckPop" /> : <Plus className="w-3.5 h-3.5" />}
+                              {partInList ? <Check className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
                             </button>
                           )}
                         </div>
@@ -891,7 +855,7 @@ export default function DetailModal({
                     <div
                       key={sim.id}
                       onClick={() => openRelated(sim)}
-                      className="group rounded-md overflow-hidden bg-[#2f2f2f] cursor-pointer netflix-card-transition hover:ring-1 hover:ring-white/30"
+                      className="group rounded-md overflow-hidden bg-[#2f2f2f] cursor-pointer transition hover:ring-1 hover:ring-white/30"
                     >
                       <div className="relative aspect-video bg-neutral-900 overflow-hidden">
                         {simImg && (
@@ -899,11 +863,11 @@ export default function DetailModal({
                             src={simImg}
                             alt={simTitle}
                             loading="lazy"
-                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ease-nf-out"
+                            className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
                           />
                         )}
-                        <div className="absolute inset-0 bg-black/35 opacity-0 group-hover:opacity-100 transition-opacity duration-250 flex items-center justify-center">
-                          <div className="w-10 h-10 rounded-full border border-white bg-black/60 flex items-center justify-center transform scale-75 group-hover:scale-100 transition-transform duration-300 ease-nf-spring">
+                        <div className="absolute inset-0 bg-black/35 opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
+                          <div className="w-10 h-10 rounded-full border border-white bg-black/60 flex items-center justify-center">
                             <Play className="w-4 h-4 fill-white text-white ml-0.5" />
                           </div>
                         </div>
@@ -930,10 +894,10 @@ export default function DetailModal({
                                 e.stopPropagation();
                                 onToggleWatchlist(sim);
                               }}
-                              className="nf-icon-btn w-8 h-8 rounded-full border border-white/50 hover:border-white flex items-center justify-center text-white shrink-0"
+                              className="w-8 h-8 rounded-full border border-white/50 hover:border-white flex items-center justify-center text-white shrink-0"
                               title={simInList ? 'Quitar de Mi lista' : 'Agregar a Mi lista'}
                             >
-                              {simInList ? <Check className="w-4 h-4 animate-nfCheckPop" /> : <Plus className="w-4 h-4" />}
+                              {simInList ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
                             </button>
                           )}
                         </div>
@@ -953,7 +917,7 @@ export default function DetailModal({
                     type="button"
                     onClick={() => setShowAllSimilar((v) => !v)}
                     aria-label={showAllSimilar ? 'Mostrar menos títulos' : 'Mostrar más títulos'}
-                    className="nf-icon-btn absolute w-10 h-10 rounded-full border border-white/50 hover:border-white bg-[#181818] text-white flex items-center justify-center shadow-lg"
+                    className="absolute w-10 h-10 rounded-full border border-white/50 hover:border-white bg-[#181818] text-white flex items-center justify-center shadow-lg transition"
                   >
                     {showAllSimilar ? (
                       <ChevronUp className="w-5 h-5" />
@@ -1003,108 +967,152 @@ export default function DetailModal({
         </div>
       </div>
 
+      {/* MODAL DE DESCARGA OFFLINE CON DISEÑO Y TIPOGRAFÍA NETFLIX SANS OFICIAL */}
       {downloadOpen && (
         <div
-          className={`fixed inset-0 z-[70] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 ${
-            downloadClosing ? 'animate-nfBackdropOut pointer-events-none' : 'animate-nfBackdrop'
-          }`}
-          onClick={(event) => {
-            event.stopPropagation();
-            closeDownloadModal();
-          }}
+          className="fixed inset-0 z-[70] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 font-netflix"
+          onClick={(event) => event.stopPropagation()}
         >
           <div
             role="dialog"
             aria-modal="true"
             aria-label="Descarga offline"
-            onClick={(event) => event.stopPropagation()}
-            className={`w-full max-w-lg rounded-2xl border border-white/20 bg-[#202020] p-5 shadow-[0_30px_90px_rgba(0,0,0,0.95)] text-white max-h-[90vh] overflow-y-auto ${
-              downloadClosing ? 'animate-modalSlideDown' : 'animate-modalSlideUp'
-            }`}
+            className="w-full max-w-[520px] rounded-lg border border-white/15 bg-[#181818] p-6 shadow-[0_28px_80px_rgba(0,0,0,0.95)] text-white max-h-[90vh] overflow-y-auto space-y-5 font-netflix"
           >
-            <div className="flex items-center justify-between gap-3 mb-4">
-              <h2 className="text-lg font-bold flex items-center gap-2">
-                <Download size={19} className="text-[#E50914]" /> Descargar para ver offline
-              </h2>
+            <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-3.5">
+              <div className="flex items-center gap-2.5">
+                <span className="w-1 h-5 bg-[#E50914] rounded-sm inline-block" />
+                <h2 className="text-lg sm:text-xl font-bold tracking-tight text-white">
+                  Descargar sin conexión
+                </h2>
+              </div>
               <button
                 type="button"
-                onClick={closeDownloadModal}
+                onClick={() => setDownloadOpen(false)}
                 aria-label="Cerrar descargas"
-                className="nf-icon-btn p-1.5 rounded-full bg-white/5 hover:bg-white/15 text-neutral-300 hover:text-white"
+                className="w-8 h-8 rounded-full bg-[#2a2a2a] hover:bg-[#3a3a3a] text-neutral-300 hover:text-white flex items-center justify-center transition"
               >
-                <X size={20} />
+                <X size={18} />
               </button>
             </div>
-            <p className="text-sm text-neutral-300 mb-4">
-              {title}{isTv ? ` · Temporada ${selectedSeason}, episodio ${downloadEpisode}` : ''}
-            </p>
-            {isTv && (
-              <label className="text-xs text-neutral-300 block mb-3">
-                Episodio
-                <input
-                  type="number"
-                  min="1"
-                  max="999"
-                  value={downloadEpisode}
-                  onChange={(event) => setDownloadEpisode(Number(event.target.value) || 1)}
-                  onBlur={() => void loadDownloadSources(downloadEpisode)}
-                  className="ml-2 w-20 rounded-lg bg-black/60 border border-white/15 p-2 text-white focus:border-[#E50914] outline-none transition-colors"
-                />
-              </label>
-            )}
-            <label className="text-xs text-neutral-300 block mb-3">
-              Calidad offline
-              <select
+
+            <div className="flex items-center justify-between gap-3 bg-[#232323] border border-white/10 rounded-[4px] px-4 py-3">
+              <div className="min-w-0">
+                <p className="text-base font-bold text-white truncate">{title}</p>
+                <p className="text-xs text-[#b3b3b3] mt-0.5">
+                  {isTv
+                    ? `Temporada ${selectedSeason} · Episodio ${downloadEpisode}`
+                    : 'Película completa · Compresión Per-Title'}
+                </p>
+              </div>
+              {isTv && (
+                <label className="text-xs text-[#b3b3b3] flex items-center gap-2 shrink-0 font-medium">
+                  <span>Episodio</span>
+                  <input
+                    type="number"
+                    min="1"
+                    max="999"
+                    value={downloadEpisode}
+                    onChange={(event) => setDownloadEpisode(Number(event.target.value) || 1)}
+                    onBlur={() => void loadDownloadSources(downloadEpisode)}
+                    className="w-16 rounded-[4px] bg-[#141414] border border-white/25 focus:border-white px-2.5 py-1.5 text-xs font-bold text-white text-center focus:outline-none"
+                  />
+                </label>
+              )}
+            </div>
+
+            <div className="space-y-1.5">
+              <span className="text-xs font-medium text-[#b3b3b3] block">
+                Calidad de descarga (Motor Per-Title sin pérdida visual)
+              </span>
+              <CustomSelect
+                options={OFFLINE_QUALITY_OPTIONS}
                 value={downloadQuality}
-                onChange={(event) => setDownloadQuality(event.target.value)}
-                className="block w-full mt-1 rounded-lg bg-black/60 border border-white/15 p-2 text-sm text-white focus:border-[#E50914] outline-none transition-colors"
-              >
-                <option value="compact">Compacta · 720p máximo, video H.264 y audio AAC</option>
-                <option value="original">Original · sin recomprimir, MP4/WebM hasta 2 GB</option>
-              </select>
-            </label>
-            <p className="text-xs text-neutral-400 mb-3">
-              La versión compacta guarda la película o el episodio completo. Su tamaño final depende de la duración y del origen; la conversión puede tardar.
-            </p>
-            <label className="text-xs text-neutral-300 block mb-2">
-              Fuente encontrada
-              <select
+                onChange={setDownloadQuality}
+                className="w-full"
+                menuClassName="w-full"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <span className="text-xs font-medium text-[#b3b3b3] block">
+                Servidor disponible ({downloadSources.length})
+              </span>
+              <CustomSelect
+                options={sourceSelectOptions}
                 value={downloadIndex}
-                onChange={(event) => setDownloadIndex(Number(event.target.value))}
-                disabled={!downloadSources.length}
-                className="block w-full mt-1 rounded-lg bg-black/60 border border-white/15 p-2 text-sm text-white disabled:opacity-50 focus:border-[#E50914] outline-none transition-colors"
-              >
-                {downloadSources.length ? (
-                  downloadSources.map((stream, index) => (
-                    <option key={`${stream.infoHash || stream.url}-${index}`} value={index}>
-                      {stream.source || 'Fuente'} · {stream.resolution || 'HD'} · {stream.language || 'Idioma sin confirmar'} {stream.size ? `· ${stream.size}` : ''}
-                    </option>
-                  ))
-                ) : (
-                  <option>{downloadLoading ? 'Buscando fuentes…' : 'Sin fuentes automáticas'}</option>
-                )}
-              </select>
-            </label>
-            <label className="text-xs text-neutral-300 block mb-4">
-              O pega un enlace MP4/WebM directo propio
+                onChange={(val) => setDownloadIndex(Number(val))}
+                searchable={downloadSources.length > 6}
+                className="w-full"
+                menuClassName="w-full"
+              />
+            </div>
+
+            <label className="text-xs font-medium text-[#b3b3b3] block">
+              Enlace MP4 / WebM / HLS VOD (opcional)
               <input
                 type="url"
                 value={downloadUrl}
                 onChange={(event) => setDownloadUrl(event.target.value)}
                 placeholder="https://servidor.example/video.mp4"
-                className="block w-full mt-1 rounded-lg bg-black/60 border border-white/15 p-2 text-sm text-white focus:border-[#E50914] outline-none transition-colors"
+                className="block w-full mt-1.5 rounded-[4px] bg-[#141414] border border-white/20 focus:border-white px-3 py-2 text-xs text-white placeholder-neutral-500 focus:outline-none"
               />
             </label>
-            {downloadError && <p role="alert" className="text-xs text-amber-300 mb-3 animate-nfTabContent">{downloadError}</p>}
-            {downloadSuccess && <p role="status" className="text-xs text-emerald-300 mb-3 animate-nfTabContent">{downloadSuccess}</p>}
-            <button
-              type="button"
-              onClick={startOfflineDownload}
-              disabled={downloadBusy || downloadLoading || (!downloadUrl.trim() && !downloadSources.length)}
-              className="hero-primary-cta w-full rounded-md bg-white text-black font-bold py-2.5 disabled:opacity-50"
-            >
-              {downloadBusy ? 'Iniciando…' : 'Iniciar descarga offline'}
-            </button>
+
+            {seasonBatchProgress && (
+              <p className="text-xs text-neutral-200 font-medium animate-pulse">
+                {seasonBatchProgress}
+              </p>
+            )}
+            {downloadError && (
+              <p role="alert" className="text-xs text-[#E50914] font-medium">
+                {downloadError}
+              </p>
+            )}
+            {downloadSuccess && (
+              <p role="status" className="text-xs text-white bg-white/10 border-l-2 border-[#E50914] px-3 py-2 rounded-[2px] font-medium">
+                {downloadSuccess}
+              </p>
+            )}
+
+            <div className="flex flex-col sm:flex-row gap-3 pt-1">
+              <button
+                type="button"
+                onClick={startOfflineDownload}
+                disabled={
+                  downloadBusy ||
+                  seasonBatchBusy ||
+                  downloadLoading ||
+                  (!downloadUrl.trim() && !downloadSources.length)
+                }
+                className="flex-1 rounded-[4px] bg-white hover:bg-[#e6e6e6] text-black font-bold text-sm py-2.5 px-4 disabled:opacity-50 transition flex items-center justify-center gap-2"
+              >
+                <Download className="w-4 h-4 stroke-[2.5]" />
+                <span>
+                  {downloadBusy
+                    ? 'Iniciando…'
+                    : isTv
+                    ? `Descargar Episodio ${downloadEpisode}`
+                    : 'Descargar ahora'}
+                </span>
+              </button>
+
+              {isTv && episodes.length > 1 && (
+                <button
+                  type="button"
+                  onClick={startFullSeasonDownload}
+                  disabled={seasonBatchBusy || downloadBusy || downloadLoading}
+                  className="flex-1 rounded-[4px] bg-[#E50914] hover:bg-[#f6121d] text-white font-bold text-sm py-2.5 px-4 disabled:opacity-50 transition flex items-center justify-center gap-2"
+                >
+                  <Download className="w-4 h-4 stroke-[2.5]" />
+                  <span>
+                    {seasonBatchBusy
+                      ? 'Preparando temporada…'
+                      : `Temporada ${selectedSeason} (${episodes.length} eps)`}
+                  </span>
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}

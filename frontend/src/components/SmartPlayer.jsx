@@ -34,8 +34,10 @@ import {
   Sliders,
 } from 'lucide-react';
 import { LANGUAGE_OPTIONS, AUDIO_ENGINE_PRESETS } from '../hooks/useUserMedia.js';
+import usePlayerControls, { formatPlayerTime } from '../hooks/usePlayerControls.js';
+import useStreamSource from '../hooks/useStreamSource.js';
 
-import DirectPlayer from './DirectPlayer.jsx';
+const DirectPlayer = React.lazy(() => import('./DirectPlayer.jsx'));
 const SITE_SOURCES = [
   { id: 'cuevana', name: 'Cuevana', example: 'https://cuevana3w.pro/pelicula/... o /serie/.../episodio-1x1' },
   { id: 'animeav1', name: 'AnimeAV1', example: 'https://animeav1.com/media/.../1' },
@@ -62,9 +64,6 @@ export default function SmartPlayer({
   onChangeLanguage = null,
 }) {
   const [resolutionData, setResolutionData] = useState(null);
-  const [directInput, setDirectInput] = useState('');
-  const [directUrl, setDirectUrl] = useState('');
-  const [savedDirectSources, setSavedDirectSources] = useState([]);
   const [resolvingP2P, setResolvingP2P] = useState(true);
 
   const [selectedLanguage, setSelectedLanguage] = useState(initialLanguage || 'latino');
@@ -98,12 +97,6 @@ export default function SmartPlayer({
   const siteTitleStorageKey = `streamflix:site-titles:${mediaType}:${item?.id || item?.tmdbId}`;
   const originalLanguage = item?.original_language || null;
 
-  useEffect(() => {
-    try {
-      const stored = JSON.parse(localStorage.getItem(directStorageKey) || '[]');
-      setSavedDirectSources(Array.isArray(stored) ? stored.filter(value => typeof value === 'string' && /^https?:\/\//.test(value)).slice(0, 20) : []);
-    } catch { setSavedDirectSources([]); }
-  }, [directStorageKey]);
 
   // Arranque inmediato en el servidor Cloud más compatible según el idioma elegido
   const [activeServer, setActiveServer] = useState(() => {
@@ -248,6 +241,9 @@ export default function SmartPlayer({
   const silentAudioWatchdogRef = useRef(null);
 
   const title = item?.title || item?.name || 'Reproduciendo Contenido';
+  const { directInput, setDirectInput, directUrl, setDirectUrl, openDirectSource, saveDirectOffline } = useStreamSource({
+    storageKey: directStorageKey, title, setActiveServer, setActiveDrawer, setLaunchMessage,
+  });
 
   useEffect(() => {
     const startSec = Math.floor(Number(initialTime) || 0);
@@ -287,6 +283,19 @@ export default function SmartPlayer({
   const ensureWebAudioChain = useCallback(() => {
     const videoEl = videoRef.current;
     if (!videoEl) return;
+
+    // Solo secuestrar el audio nativo con WebAudio API si algún control DSP está activo!
+    // Si la ganancia es 100%, boost es 0, modo noche apagado y delay es 0:
+    // dejamos que el navegador use su salida de audio nativa sin riesgo de suspensión o CORS.
+    const isDspActive =
+      audioGainPercent !== 100 ||
+      dialogueBoostDb !== 0 ||
+      nightCompressorEnabled ||
+      audioOffset !== 0;
+
+    if (!isDspActive && !mediaSourceNodeRef.current) {
+      return;
+    }
 
     try {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -714,11 +723,14 @@ export default function SmartPlayer({
         typeof decodedAudioBytes === 'number' && decodedAudioBytes === 0;
 
       if (hasZeroAudioDecoded && !forceTranscode && torrentStatus?.hasFfmpeg) {
-        setTranscodeStart(trackedTimeRef.current);
+        const curSec = trackedTimeRef.current || vid.currentTime || 0;
+        // Si está en los primeros 8 segundos, arrancar limpiamente desde 0 para no forzar saltos de WebTorrent a piezas lejanas
+        const transcodeStartSec = curSec < 8 ? 0 : Math.floor(curSec);
+        setTranscodeStart(transcodeStartSec);
         setForceTranscode(true);
         setLaunchMessage({
           type: 'info',
-          text: 'No se detectó audio decodificado. Probando conversión AAC con FFmpeg.',
+          text: 'No se detectó audio decodificado. Activando conversión AAC en vivo.',
         });
         setTimeout(() => setLaunchMessage(null), 4000);
       }
@@ -839,45 +851,12 @@ export default function SmartPlayer({
     }
   };
 
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (e.key === 'Escape') {
-        if (activeDrawer) {
-          setActiveDrawer(null);
-        } else if (document.fullscreenElement) {
-          if (document.exitFullscreen) {
-            document.exitFullscreen().catch(() => {});
-          }
-        } else {
-          handleSafeClose();
-        }
-        return;
-      }
-      if (activeServer !== 'p2p' || !videoRef.current || ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(e.target.tagName)) return;
-
-      if (e.key === ' ' || e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        togglePlay();
-      } else if (e.key === 'ArrowRight') {
-        e.preventDefault();
-        const target = Math.min(duration || 0, trackedTimeRef.current + 10);
-        if (forceTranscode) setTranscodeStart(target); else videoRef.current.currentTime = target; trackedTimeRef.current = target;
-      } else if (e.key === 'ArrowLeft') {
-        e.preventDefault();
-        const target = Math.max(0, trackedTimeRef.current - 10);
-        if (forceTranscode) setTranscodeStart(target); else videoRef.current.currentTime = target; trackedTimeRef.current = target;
-      } else if (e.key.toLowerCase() === 'f') {
-        e.preventDefault();
-        toggleFullscreen();
-      } else if (e.key.toLowerCase() === 'm') {
-        e.preventDefault();
-        toggleMute();
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeServer, activeDrawer, handleSafeClose, forceTranscode, duration]);
+  const { toggleFullscreen, togglePlay, handleSeek, handleVolumeChange, toggleMute } = usePlayerControls({
+    videoRef, audioCtxRef, ensureWebAudioChain, triggerHudVisibility,
+    setIsPlaying, setCurrentTime, setVolume, setIsMuted, setIsFullscreen,
+    setTranscodeStart, trackedTimeRef, forceTranscode, duration, volume,
+    isMuted, activeServer, activeDrawer, setActiveDrawer, handleSafeClose,
+  });
 
   const syncSubtitleTracks = useCallback(() => {}, []);
   const subSyncKey = selectedSubId !== 'off'
@@ -1151,70 +1130,7 @@ export default function SmartPlayer({
     setTimeout(() => setLaunchMessage(null), 4000);
   };
 
-  const toggleFullscreen = () => {
-    const elem = document.getElementById('smart-player-container');
-    if (!elem) return;
-
-    if (!document.fullscreenElement) {
-      elem.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {});
-    } else {
-      document.exitFullscreen().then(() => setIsFullscreen(false)).catch(() => {});
-    }
-  };
-
-  const togglePlay = () => {
-    if (!videoRef.current) return;
-    ensureWebAudioChain();
-    triggerHudVisibility();
-    if (videoRef.current.paused) {
-      videoRef.current.play().catch(() => {});
-      setIsPlaying(true);
-    } else {
-      videoRef.current.pause();
-      setIsPlaying(false);
-    }
-  };
-
-  const handleSeek = (e) => {
-    const newTime = parseFloat(e.target.value);
-    if (videoRef.current) {
-      if (forceTranscode) setTranscodeStart(newTime); else videoRef.current.currentTime = newTime;
-      setCurrentTime(newTime);
-      trackedTimeRef.current = Math.floor(newTime);
-    }
-  };
-
-  const handleVolumeChange = (e) => {
-    const val = parseFloat(e.target.value);
-    setVolume(val);
-    if (videoRef.current) {
-      videoRef.current.volume = val;
-      videoRef.current.muted = val === 0; setIsMuted(val === 0);
-    }
-  };
-
-  const toggleMute = () => {
-    if (!videoRef.current) return;
-    if (isMuted) {
-      videoRef.current.muted = false;
-      videoRef.current.volume = volume || 0.5;
-      setIsMuted(false);
-    } else {
-      videoRef.current.muted = true;
-      setIsMuted(true);
-    }
-  };
-
-  const formatTime = (secs) => {
-    if (!secs || isNaN(secs)) return '00:00';
-    const h = Math.floor(secs / 3600);
-    const m = Math.floor((secs % 3600) / 60);
-    const s = Math.floor(secs % 60);
-    if (h > 0) {
-      return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-    }
-    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
-  };
+  const formatTime = formatPlayerTime;
 
   // Los enlaces de cada página se obtienen del servidor local y se agrupan por sitio.
   const embedServersList = useMemo(() => {
@@ -1376,18 +1292,6 @@ export default function SmartPlayer({
       setSiteErrors(current => ({ ...current, [source]: error.response?.data?.error || error.message || 'No se pudieron obtener los servidores.' }));
     } finally { setSiteLoading(current => ({ ...current, [source]: false })); }
   };
-  const openDirectSource = () => {
-    try { const url = new URL(directInput.trim()); if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) throw new Error(); setDirectUrl(url.href); setActiveServer('direct'); setActiveDrawer(null); const next = [url.href, ...savedDirectSources.filter(value => value !== url.href)].slice(0, 20); localStorage.setItem(directStorageKey, JSON.stringify(next)); setSavedDirectSources(next); }
-    catch { setLaunchMessage({ type: 'error', text: 'Introduce la URL HTTP/HTTPS de un archivo HLS, MP4 o WebM disponible para ti.' }); }
-  };
-  const saveDirectOffline = async () => {
-    try {
-      await api.startDownload(directInput.trim(), title);
-      setLaunchMessage({ type: 'success', text: 'Descarga iniciada. Sigue el progreso en Offline.' });
-    } catch (error) {
-      setLaunchMessage({ type: 'error', text: error.response?.data?.error || error.message || 'No se pudo iniciar la descarga.' });
-    }
-  };
   const tryNextCloud = () => {
     const next = nextCloudMirror(embedServersList, activeServer, activeMirrorIdx, attemptedCloudRef.current, cloudHealth);
     if (next) switchCloud(next.serverId, next.index);
@@ -1491,7 +1395,7 @@ export default function SmartPlayer({
           <div className="flex items-center gap-2.5 bg-black/55 hover:bg-black/75 backdrop-blur-xl border border-white/10 pl-1.5 pr-4 py-1 rounded-full shadow-xl transition-all">
             <button
               onClick={handleSafeClose}
-              className="nf-icon-btn w-8 h-8 rounded-full bg-white/10 hover:bg-[#E50914] text-white flex items-center justify-center"
+              className="w-8 h-8 rounded-full bg-white/10 hover:bg-[#E50914] text-white flex items-center justify-center transition-all hover:scale-105"
               title="Guardar progreso y volver (ESC)"
             >
               <ArrowLeft className="w-4 h-4" />
@@ -1541,7 +1445,7 @@ export default function SmartPlayer({
                     });
                   }
                 }}
-                className="nf-pill hidden sm:flex items-center gap-1.5 bg-black/80 hover:bg-white hover:text-black text-white backdrop-blur-xl border border-white/15 px-3 py-2 rounded-full text-xs font-bold shadow-lg"
+                className="hidden sm:flex items-center gap-1.5 bg-black/80 hover:bg-white hover:text-black text-white backdrop-blur-xl border border-white/15 px-3 py-2 rounded-full text-xs font-bold transition-all shadow-lg"
               >
                 <SkipForward className="w-3.5 h-3.5 fill-current" />
                 <span>Sig. Ep</span>
@@ -1559,7 +1463,7 @@ export default function SmartPlayer({
               >
                 <Tv className="w-3.5 h-3.5 text-sky-400" />
                 <span className="hidden md:inline">Episodios</span>
-                <ChevronDown className={`w-3.5 h-3.5 opacity-75 transition-transform duration-300 ease-nf-out ${activeDrawer === 'episodes' ? 'rotate-180' : ''}`} />
+                <ChevronDown className="w-3.5 h-3.5 opacity-75" />
               </button>
             </>
           )}
@@ -1576,7 +1480,7 @@ export default function SmartPlayer({
             <Headphones className="w-3.5 h-3.5 text-neutral-200" />
             <span>{currentLangObj.flag}</span>
             <span className="hidden sm:inline">Audio e idioma</span>
-            <ChevronDown className={`w-3.5 h-3.5 opacity-75 transition-transform duration-300 ease-nf-out ${activeDrawer === 'audio' ? 'rotate-180' : ''}`} />
+            <ChevronDown className="w-3.5 h-3.5 opacity-75" />
           </button>
 
           <button
@@ -1591,7 +1495,7 @@ export default function SmartPlayer({
           >
             <Layers className="w-3.5 h-3.5 text-neutral-200" />
             <span className="max-w-[115px] sm:max-w-[175px] truncate">{activeServerLabel}</span>
-            <ChevronDown className={`w-3.5 h-3.5 opacity-75 transition-transform duration-300 ease-nf-out ${activeDrawer === 'servers' ? 'rotate-180' : ''}`} />
+            <ChevronDown className="w-3.5 h-3.5 opacity-75" />
           </button>
         </div>
       </div>
@@ -1599,7 +1503,7 @@ export default function SmartPlayer({
       {/* CAJÓN A: Audio e Idioma (Diseño intuitivo con 2 pestañas) */}
       <div
         onClick={(e) => e.stopPropagation()}
-        className={`absolute top-16 right-4 sm:right-24 z-50 w-[355px] sm:w-[400px] max-w-[94vw] max-h-[80vh] overflow-hidden flex flex-col bg-[#141414]/98 backdrop-blur-2xl border border-white/15 rounded-2xl shadow-[0_25px_70px_rgba(0,0,0,0.95)] ${activeDrawer === 'audio' ? 'animate-nfDropdown' : 'hidden'}`}
+        className={`absolute top-16 right-4 sm:right-24 z-50 w-[355px] sm:w-[400px] max-w-[94vw] max-h-[80vh] overflow-hidden flex flex-col bg-[#141414]/98 backdrop-blur-2xl border border-white/15 rounded-2xl shadow-[0_25px_70px_rgba(0,0,0,0.95)] ${activeDrawer === 'audio' ? 'animate-panelEnter' : 'hidden'}`}
       >
         <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
           <h3 className="text-sm font-bold text-white flex items-center gap-2">
@@ -1634,7 +1538,7 @@ export default function SmartPlayer({
 
         <div className="p-4 overflow-y-auto space-y-4">
           {audioMenuTab === 'lang' ? (
-            <div className="space-y-4 animate-nfTabContent">
+            <>
               <div className="space-y-2">
                 <span className="text-xs font-bold text-neutral-300 block">Idioma preferido</span>
                 <p className="text-[11px] text-neutral-400">Esta preferencia prioriza fuentes e idiomas disponibles; no crea un doblaje nuevo.</p>
@@ -1801,9 +1705,9 @@ export default function SmartPlayer({
                   </div>
                 </div>
               )}
-            </div>
+            </>
           ) : audioMenuTab === 'dsp' ? (
-            <div className="space-y-4 animate-nfTabContent">
+            <>
               <fieldset disabled={activeServer !== 'p2p'} className="space-y-4 disabled:opacity-45">
                 {activeServer !== 'p2p' && (
                   <p className="text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/25 rounded-lg px-3 py-2">
@@ -1867,7 +1771,7 @@ export default function SmartPlayer({
                 </div>
               </fieldset>
 
-            </div>
+            </>
           ) : null}
           <div className={audioMenuTab === 'external' ? 'space-y-3' : 'hidden'}>
             {activeServer === 'p2p' && selectedP2PStream ? (
@@ -1899,7 +1803,7 @@ export default function SmartPlayer({
       {activeDrawer === 'servers' && (
         <div
           onClick={(e) => e.stopPropagation()}
-          className="absolute top-16 right-4 z-50 w-[370px] sm:w-[435px] max-w-[94vw] max-h-[80vh] overflow-hidden flex flex-col bg-[#141414]/98 backdrop-blur-2xl border border-white/15 rounded-2xl shadow-[0_25px_70px_rgba(0,0,0,0.95)] animate-nfDropdown"
+          className="absolute top-16 right-4 z-50 w-[370px] sm:w-[435px] max-w-[94vw] max-h-[80vh] overflow-hidden flex flex-col bg-[#141414]/98 backdrop-blur-2xl border border-white/15 rounded-2xl shadow-[0_25px_70px_rgba(0,0,0,0.95)] animate-panelEnter"
         >
           <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
             <div>
@@ -1939,7 +1843,7 @@ export default function SmartPlayer({
 
           <div className="p-4 overflow-y-auto space-y-3.5">
             {serverMenuTab === 'cloud' && (
-              <div className="space-y-3.5 animate-nfTabContent">
+              <>
                 <div className="flex items-center gap-2">
                   <button
                     onClick={tryNextCloud}
@@ -2013,11 +1917,11 @@ export default function SmartPlayer({
                       </div>
                     </div>
                   )}
-              </div>
+              </>
             )}
 
             {serverMenuTab === 'p2p' && (
-              <div className="space-y-3 animate-nfTabContent">
+              <div className="space-y-3">
                 <div className="flex items-center justify-between gap-2">
                   <button
                     onClick={() => setForceTranscode(!forceTranscode)}
@@ -2082,7 +1986,7 @@ export default function SmartPlayer({
                               <span>{s.resolution}</span>
                               <span>•</span>
                               <span className="text-sky-400">{s.language}</span>
-                              <span className="text-amber-300">{s.source === 'yts' ? 'YTS' : s.source === 'torrentio' ? 'Torrentio' : s.source || 'Add-on'}</span>
+                              <span className="text-amber-300">{s.source === 'yts' ? 'YTS' : s.source === 'torrentio' ? 'Torrentio' : s.source === 'eztv' ? 'EZTV' : s.source || 'Add-on'}</span>
                               <span className="px-1.5 py-0.2 bg-white/10 text-[10px] rounded font-semibold">
                                 {s.url ? 'Enlace HTTPS del add-on' : s.audioGuaranteed || s.browserNative ? 'Listo para navegador' : 'MKV Multi-Audio'}
                               </span>
@@ -2130,7 +2034,7 @@ export default function SmartPlayer({
             )}
 
             {serverMenuTab === 'sites' && (
-              <div className="space-y-3 animate-nfTabContent">
+              <div className="space-y-3">
                 {SITE_SOURCES.map((source) => {
                   const servers = siteServers[source.id] || [];
                   const languages = [...new Set(servers.map((server) => server.languageCode).filter((code) => code && code !== 'unknown'))];
@@ -2149,7 +2053,7 @@ export default function SmartPlayer({
                         <ChevronDown className={`w-4 h-4 text-neutral-400 transition-transform ${expanded ? 'rotate-180' : ''}`} />
                       </button>
                       {expanded && (
-                        <div className="px-3 pb-3 space-y-2 animate-nfAccordion">
+                        <div className="px-3 pb-3 space-y-2">
                           <div className="flex gap-1.5">
                             <input
                               type="search"
@@ -2226,9 +2130,9 @@ export default function SmartPlayer({
                     disabled={!directInput.trim()}
                     className="w-full py-2 text-xs font-bold rounded-lg bg-white/10 hover:bg-white/20 text-white disabled:opacity-50 transition"
                   >
-                    Guardar offline compacto (MP4/WebM)
+                    Guardar offline compacto
                   </button>
-                  <p className="text-[10px] text-neutral-400">Solo archivos directos HTTPS disponibles para descarga; no funciona con HLS, páginas externas ni canales premium.</p>
+                  <p className="text-[10px] text-neutral-400">Admite archivos directos HTTPS y HLS VOD compatibles; no páginas externas ni canales en vivo.</p>
                 </div>
               </div>
             )}
@@ -2253,7 +2157,7 @@ export default function SmartPlayer({
       {activeDrawer === 'episodes' && isSeries && (
         <div
           onClick={(e) => e.stopPropagation()}
-          className="absolute top-16 right-4 sm:right-16 z-50 w-[350px] sm:w-[420px] max-w-[94vw] max-h-[80vh] flex flex-col bg-[#121212]/98 backdrop-blur-3xl border border-white/15 ring-1 ring-[#E50914]/30 rounded-2xl shadow-[0_25px_70px_rgba(0,0,0,0.95)] p-4 animate-nfDropdown"
+          className="absolute top-16 right-4 sm:right-16 z-50 w-[350px] sm:w-[420px] max-w-[94vw] max-h-[80vh] flex flex-col bg-[#121212]/98 backdrop-blur-3xl border border-white/15 ring-1 ring-[#E50914]/30 rounded-2xl shadow-[0_25px_70px_rgba(0,0,0,0.95)] p-4 animate-panelEnter"
         >
           <div className="flex items-center justify-between pb-3 border-b border-white/10">
             <div className="flex items-center gap-2">
@@ -2384,7 +2288,9 @@ export default function SmartPlayer({
               onError={() => {
                 // Si falló en modo nativo y FFmpeg está disponible, activar FFmpeg antes de mostrar error
                 if (!forceTranscode && torrentStatus?.hasFfmpeg) {
-                  setTranscodeStart(trackedTimeRef.current); setForceTranscode(true);
+                  const curSec = trackedTimeRef.current || 0;
+                  setTranscodeStart(curSec < 8 ? 0 : Math.floor(curSec));
+                  setForceTranscode(true);
                   setVideoError(false);
                 } else {
                   setVideoError(true);
@@ -2523,7 +2429,7 @@ export default function SmartPlayer({
                   <button
                     onClick={togglePlay}
                     aria-label={isPlaying ? 'Pausar' : 'Reproducir'}
-                    className="nf-icon-btn p-1.5 rounded-full text-white hover:text-[#E50914] hover:bg-white/10"
+                    className="p-1.5 text-white hover:text-[#E50914] transition"
                   >
                     {isPlaying ? (
                       <Pause className="w-5 h-5 fill-current" />
@@ -2556,7 +2462,7 @@ export default function SmartPlayer({
                     onClick={() =>
                       setActiveDrawer(activeDrawer === 'audio' ? null : 'audio')
                     }
-                    className="nf-pill flex items-center gap-1 px-2.5 py-1 rounded-full bg-[#E50914]/20 border border-[#E50914]/50 text-xs font-extrabold text-red-200"
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-[#E50914]/20 border border-[#E50914]/50 text-xs font-extrabold text-red-200"
                   >
                     <Headphones className="w-3.5 h-3.5 text-[#E50914]" />
                     <span>DSP {audioGainPercent}%</span>
@@ -2567,7 +2473,7 @@ export default function SmartPlayer({
                       onClick={() =>
                         setActiveDrawer(activeDrawer === 'subtitles' ? null : 'subtitles')
                       }
-                      className="nf-pill flex items-center gap-1 px-2.5 py-1 rounded-full bg-white/10 hover:bg-white/15 text-xs font-bold text-white"
+                      className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-white/10 hover:bg-white/15 text-xs font-bold text-white"
                     >
                       <Subtitles className="w-3.5 h-3.5 text-amber-400" />
                       <span>Subtítulos ({subtitles.length})</span>
@@ -2583,7 +2489,7 @@ export default function SmartPlayer({
                       return (
                       <div
                         onClick={(e) => e.stopPropagation()}
-                        className="absolute bottom-10 left-0 bg-[#141414]/98 backdrop-blur-xl border border-white/15 rounded-xl shadow-2xl w-80 max-w-[90vw] z-50 overflow-hidden animate-nfPopoverUp"
+                        className="absolute bottom-10 left-0 bg-[#141414]/98 backdrop-blur-xl border border-white/15 rounded-xl shadow-2xl w-80 max-w-[90vw] z-50 overflow-hidden"
                       >
                         <div className="grid grid-cols-3 border-b border-white/10 bg-white/[0.03] text-[11px] font-bold">
                           {[
@@ -2605,7 +2511,7 @@ export default function SmartPlayer({
                           ))}
                         </div>
 
-                        <div key={subMenuTab} className="p-3 max-h-[58vh] overflow-y-auto space-y-2.5 animate-nfTabContent">
+                        <div className="p-3 max-h-[58vh] overflow-y-auto space-y-2.5">
                           {subMenuTab === 'tracks' && (
                             <>
                               <button

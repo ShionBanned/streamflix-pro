@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import api from '../services/api.js';
 import Hls from 'hls.js';
 import CustomSelect from './CustomSelect.jsx';
+import { ChannelRowCarousel, NetflixChannelCard } from './LiveChannelCards.jsx';
 import { getCuratedChannelMix } from '../utils/channelMix.js';
 import {
   Radio,
@@ -119,221 +120,10 @@ const TV_GENRE_OPTIONS = [
 const INITIAL_BATCH_SIZE = 60;
 const BATCH_INCREMENT = 60;
 
-/**
- * Devuelve un degradado atmosférico de cine según la categoría del canal
- * para que cada tarjeta 16:9 luzca como una miniatura panorámica de Netflix.
- */
-function getChannelCardTheme(category = '', country = '') {
-  const c = (category || '').toLowerCase();
-  if (c.includes('deporte')) {
-    return 'from-emerald-950/90 via-[#141f18] to-[#0e0e0e] border-emerald-500/20';
-  }
-  if (c.includes('película') || c.includes('pluto')) {
-    return 'from-[#36090c] via-[#1a1012] to-[#0e0e0e] border-red-500/20';
-  }
-  if (c.includes('anime') || c.includes('infantil')) {
-    return 'from-orange-950/90 via-[#1e130d] to-[#0e0e0e] border-orange-500/20';
-  }
-  if (c.includes('noticia')) {
-    return 'from-sky-950/90 via-[#0f1922] to-[#0e0e0e] border-sky-500/20';
-  }
-  if (country === 'co' || c.includes('colombia')) {
-    return 'from-amber-950/85 via-[#1c160d] to-[#0e0e0e] border-amber-500/20';
-  }
-  return 'from-neutral-900 via-[#161616] to-[#0e0e0e] border-white/10';
-}
-
-/**
- * Tarjeta Panorámica 16:9 Estilo Netflix Live
- */
-function NetflixChannelCard({
-  channel,
-  isActive,
-  isFav,
-  onSelect,
-  onToggleFavorite,
-  isFixedWidth = true,
-}) {
-  const themeClass = getChannelCardTheme(channel.category, channel.country);
-
-  return (
-    <div
-      onClick={() => onSelect(channel)}
-      className={`group relative ${
-        isFixedWidth ? 'w-64 sm:w-72 shrink-0' : 'w-full'
-      } tv-channel-card rounded-md overflow-hidden bg-gradient-to-br ${themeClass} border cursor-pointer select-none netflix-card-transition ${
-        isActive
-          ? 'ring-2 ring-[#E50914] border-[#E50914] shadow-[0_14px_38px_rgba(229,9,20,0.35)]'
-          : 'hover:border-white/30'
-      }`}
-    >
-      {/* Lienzo 16:9 Estilo Netflix */}
-      <div className="aspect-video w-full relative p-4 flex flex-col justify-between overflow-hidden">
-        {/* Resplandor ambiental decorativo */}
-        <div className="absolute -right-10 -top-10 w-32 h-32 rounded-full bg-white/5 blur-2xl pointer-events-none" />
-
-        {/* Fila Superior: Insignia DIRECTO + Botón Favorito */}
-        <div className="relative z-10 flex items-center justify-between gap-2">
-          <div className="flex items-center gap-1.5">
-            <span className="w-4 h-4 rounded bg-[#E50914] text-white font-black text-[9px] flex items-center justify-center shadow">
-              N
-            </span>
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/65 backdrop-blur-md border border-white/15 text-[9px] font-black uppercase tracking-wider text-white">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#E50914] animate-pulse" />
-              {isActive ? 'REPRODUCIENDO' : 'EN VIVO'}
-            </span>
-          </div>
-
-          <button
-            type="button"
-            onClick={(e) => onToggleFavorite(channel, e)}
-            className={`nf-icon-btn w-7 h-7 rounded-full flex items-center justify-center backdrop-blur-md border ${
-              isFav
-                ? 'bg-amber-500/25 border-amber-400/50 text-amber-300'
-                : 'bg-black/50 border-white/15 text-neutral-400 hover:text-white'
-            }`}
-            title={isFav ? 'Quitar de Mi Lista de Canales' : 'Guardar en Mi Lista de Canales'}
-          >
-            <Star className={`w-3.5 h-3.5 ${isFav ? 'fill-current text-amber-400' : ''}`} />
-          </button>
-        </div>
-
-        {/* Centro: Logo del Canal en Alta Definición */}
-        <div className="relative z-10 my-auto flex items-center justify-center py-1">
-          <div className="w-20 h-14 sm:w-24 sm:h-16 rounded-md bg-black/55 backdrop-blur-md border border-white/10 p-2 flex items-center justify-center shadow-xl group-hover:scale-105 transition-transform duration-300">
-            <img
-              src={channel.logo}
-              alt={channel.name}
-              loading="lazy"
-              className="w-full h-full object-contain"
-              onError={(e) => {
-                e.target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(
-                  channel.name
-                )}&background=E50914&color=fff&size=128&bold=true`;
-              }}
-            />
-          </div>
-        </div>
-
-        {/* Fila Inferior: Nombre del Canal + Metadatos */}
-        <div className="relative z-10">
-          <h4
-            className={`text-xs sm:text-sm font-black truncate drop-shadow ${
-              isActive ? 'text-red-400' : 'text-white group-hover:text-red-300'
-            }`}
-          >
-            {channel.name}
-          </h4>
-          <div className="flex items-center justify-between text-[10px] text-neutral-300/90 mt-0.5">
-            <span className="truncate">
-              {channel.category} • {channel.countryName || 'Global'}
-            </span>
-            <span className="font-bold text-neutral-400 shrink-0 ml-2">TV</span>
-          </div>
-        </div>
-
-        {/* Overlay de Reproducción Instantánea en Hover */}
-        <div className="absolute inset-0 bg-black/45 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center z-20">
-          <div className="w-11 h-11 rounded-full bg-white text-black flex items-center justify-center shadow-[0_0_25px_rgba(255,255,255,0.5)] transform scale-75 group-hover:scale-105 transition-transform duration-300 ease-nf-spring">
-            <Play className="w-5 h-5 fill-current ml-0.5" />
-          </div>
-        </div>
-
-        {/* Barra de Progreso de Emisión En Vivo Estilo Netflix */}
-        <div className="absolute bottom-0 left-0 right-0 h-1 bg-white/10 z-20">
-          <div
-            className={`h-full bg-[#E50914] ${
-              isActive ? 'w-full shadow-[0_0_8px_#E50914]' : 'w-2/3'
-            }`}
-          />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/**
- * Carrusel Horizontal de Canales 16:9 Estilo Netflix
- */
-function ChannelRowCarousel({
-  title,
-  subtitle = null,
-  channels = [],
-  currentChannel,
-  onSelectChannel,
-  onToggleFavorite,
-  isFavorite,
-  maxItems = 40,
-  onViewAll = null,
-}) {
-  const rowRef = useRef(null);
-  const [scrolling, setScrolling] = useState(false);
-
-  if (!channels || channels.length === 0) return null;
-
-  const scrollRow = (dir) => {
-    if (!rowRef.current) return;
-    setScrolling(true);
-    rowRef.current.scrollBy({
-      left: Math.round(rowRef.current.clientWidth * 0.85) * (dir === 'left' ? -1 : 1),
-      behavior: 'smooth',
-    });
-    setTimeout(() => setScrolling(false), 400);
-  };
-
-  return (
-    <div className="relative group/chrow py-3.5 px-4 sm:px-8 lg:px-12 max-w-[1480px] mx-auto animate-rowReveal">
-      <div className="flex items-end justify-between mb-3">
-        <div>
-          <h3 className="text-lg sm:text-2xl font-extrabold text-white tracking-tight flex items-center gap-2.5">
-            <span className="w-1.5 h-5 bg-[#E50914] rounded-full inline-block shadow-[0_0_8px_#E50914]" />
-            <span>{title.replace(/^[^\p{L}\p{N}]+/u, '')}</span>
-          </h3>
-          {subtitle && <p className="text-xs text-neutral-400 mt-0.5 ml-4">{subtitle}</p>}
-        </div>
-        <div className="flex items-center gap-3"><span className="text-[11px] text-neutral-500 font-semibold">{channels.length} canales</span>{onViewAll && channels.length > maxItems && <button type="button" onClick={onViewAll} className="text-xs font-bold text-white hover:text-red-400">Ver todos</button>}</div>
-      </div>
-
-      <button
-        type="button"
-        onClick={() => scrollRow('left')}
-        className="hidden md:flex absolute left-1 top-1/2 z-30 w-11 h-28 -translate-y-1/2 bg-black/80 hover:bg-[#E50914] text-white rounded-r-2xl items-center justify-center opacity-0 group-hover/chrow:opacity-100 transition-all duration-300 hover:scale-105 border-y border-r border-white/15 backdrop-blur-md shadow-2xl"
-      >
-        <ChevronLeft className="w-7 h-7" />
-      </button>
-      <button
-        type="button"
-        onClick={() => scrollRow('right')}
-        className="hidden md:flex absolute right-1 top-1/2 z-30 w-11 h-28 -translate-y-1/2 bg-black/80 hover:bg-[#E50914] text-white rounded-l-2xl items-center justify-center opacity-0 group-hover/chrow:opacity-100 transition-all duration-300 hover:scale-105 border-y border-l border-white/15 backdrop-blur-md shadow-2xl"
-      >
-        <ChevronRight className="w-7 h-7" />
-      </button>
-
-      <div
-        ref={rowRef}
-        className={`flex items-stretch gap-4 overflow-x-auto no-scrollbar pb-4 pt-1 -mx-4 px-4 sm:-mx-8 sm:px-8 scroll-smooth transition-transform duration-300 ${
-          scrolling ? 'scale-[0.995]' : 'scale-100'
-        }`}
-      >
-        {channels.slice(0, maxItems).map((ch) => (
-          <NetflixChannelCard
-            key={`row-${title}-${ch.url}`}
-            channel={ch}
-            isActive={currentChannel?.url === ch.url}
-            isFav={isFavorite(ch)}
-            onSelect={onSelectChannel}
-            onToggleFavorite={onToggleFavorite}
-            isFixedWidth={true}
-          />
-        ))}
-      </div>
-    </div>
-  );
-}
-
 export default function LiveTV() {
-  const [channels, setChannels] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const initialSnapshot = useMemo(() => api.getCachedIptvSnapshot(), []);
+  const [channels, setChannels] = useState(() => initialSnapshot?.channels || []);
+  const [loading, setLoading] = useState(() => !(initialSnapshot?.channels?.length > 0));
   const [refreshing, setRefreshing] = useState(false);
 
   const [selectedCategory, setSelectedCategory] = useState('Todos');
@@ -346,7 +136,7 @@ export default function LiveTV() {
   const [currentChannel, setCurrentChannel] = useState(null);
   const [sourceIndex, setSourceIndex] = useState(0);
   const [showHidden, setShowHidden] = useState(false);
-  const [hiddenCount, setHiddenCount] = useState(0);
+  const [hiddenCount, setHiddenCount] = useState(() => initialSnapshot?.hiddenCount || 0);
   const [recoveredChannel, setRecoveredChannel] = useState('');
   const [playerError, setPlayerError] = useState(false);
   const [audioOnlyWarning, setAudioOnlyWarning] = useState(false);
@@ -411,22 +201,7 @@ export default function LiveTV() {
   });
 
   const [showModal, setShowModal] = useState(false);
-  const [modalClosing, setModalClosing] = useState(false);
-  const [loadError, setLoadError] = useState('');
   const [modalTab, setModalTab] = useState('m3u');
-
-  const closeIptvModal = useCallback(() => {
-    if (modalClosing) return;
-    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
-      setShowModal(false);
-      return;
-    }
-    setModalClosing(true);
-    setTimeout(() => {
-      setShowModal(false);
-      setModalClosing(false);
-    }, 280);
-  }, [modalClosing]);
   const [newM3uUrl, setNewM3uUrl] = useState('');
   const [newM3uName, setNewM3uName] = useState('');
   const [xtreamServer, setXtreamServer] = useState('');
@@ -448,14 +223,15 @@ export default function LiveTV() {
     };
   }, [triggerHud]);
 
+  const favoritesSet = useMemo(() => new Set(favorites), [favorites]);
+
   const loadChannels = useCallback(
     async (forceRefresh = false) => {
       if (forceRefresh) setRefreshing(true);
-      else setLoading(true);
+      else if (channels.length === 0) setLoading(true);
 
       setPlayerError(false);
       setAudioOnlyWarning(false);
-      setLoadError('');
       try {
         const customUrls = customSources
           .filter((s) => s.type === 'm3u' && s.url)
@@ -480,25 +256,41 @@ export default function LiveTV() {
         const list = data?.channels || [];
         setChannels(list);
         setHiddenCount(data?.hiddenCount || 0);
-
-        if (!currentChannel && list.length > 0) {
-          const firstFav = list.find((c) => favorites.includes(c.url));
-          const firstFast = list.find((c) => (c.source === 'Oficial FAST' || c.source === 'Pluto TV' || c.category === 'Pluto TV 24/7') && !c.isHevcHint && !c.isGeoBlocked);
-          const firstClean = list.find((c) => !c.isHevcHint && !c.isGeoBlocked);
-          setCurrentChannel(firstFav || firstFast || firstClean || list[0]);
+        if (!forceRefresh && list.length > 0 && list.length < 220) {
+          window.setTimeout(() => {
+            api.getIptvChannels({ refresh: false, includeHidden: showHidden, customUrls, xtream })
+              .then((fullData) => {
+                if (fullData?.channels?.length > list.length) {
+                  setChannels(fullData.channels);
+                  setHiddenCount(fullData.hiddenCount || 0);
+                }
+              })
+              .catch(() => {});
+          }, 2200);
         }
+
+        setCurrentChannel((prev) => {
+          if (prev || list.length === 0) return prev;
+          const firstFav = list.find((c) => favoritesSet.has(c.url));
+          const firstPluto = list.find((c) => c.category === 'Pluto TV 24/7' && !c.isHevcHint);
+          return firstFav || firstPluto || list[0];
+        });
       } catch (err) {
         console.error('Error cargando canales IPTV:', err);
-        setLoadError('No se pudo conectar con el servidor de canales en vivo. Verifica que el backend esté activo.');
       } finally {
         setLoading(false);
         setRefreshing(false);
       }
     },
-    [customSources, currentChannel, favorites, showHidden]
+    [customSources, showHidden, favoritesSet, channels.length]
   );
 
   useEffect(() => {
+    if (!currentChannel && channels.length > 0) {
+      const firstFav = channels.find((c) => favoritesSet.has(c.url));
+      const firstPluto = channels.find((c) => c.category === 'Pluto TV 24/7' && !c.isHevcHint);
+      setCurrentChannel(firstFav || firstPluto || channels[0]);
+    }
     loadChannels();
   }, [showHidden]);
 
@@ -518,9 +310,9 @@ export default function LiveTV() {
 
   const isFavorite = useCallback(
     (channel) => {
-      return channel ? favorites.includes(channel.url) : false;
+      return channel ? favoritesSet.has(channel.url) : false;
     },
-    [favorites]
+    [favoritesSet]
   );
 
   // Inicializar HLS con selección automática H.264
@@ -578,8 +370,8 @@ export default function LiveTV() {
       return true;
     };
     const proxyParams = new URLSearchParams({ url: source.url });
-    if (source.referrer || currentChannel.referrer) proxyParams.set('ref', source.referrer || currentChannel.referrer);
-    if (source.userAgent || currentChannel.userAgent) proxyParams.set('ua', source.userAgent || currentChannel.userAgent);
+    if (source.referrer || currentChannel.referrer) proxyParams.set("ref", source.referrer || currentChannel.referrer);
+    if (source.userAgent || currentChannel.userAgent) proxyParams.set("ua", source.userAgent || currentChannel.userAgent);
     const streamTarget = usingProxy
       ? `/api/iptv/proxy?${proxyParams.toString()}`
       : source.url;
@@ -588,12 +380,17 @@ export default function LiveTV() {
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
-        backBufferLength: 30,
-        manifestLoadingTimeOut: 14000,
-        levelLoadingTimeOut: 14000,
-        fragLoadingTimeOut: 18000,
-        maxBufferLength: 30,
-        maxMaxBufferLength: 60,
+        startLevel: -1,
+        capLevelToPlayerSize: true,
+        backBufferLength: 20,
+        manifestLoadingTimeOut: 6500,
+        manifestLoadingMaxRetry: 1,
+        levelLoadingTimeOut: 6500,
+        levelLoadingMaxRetry: 1,
+        fragLoadingTimeOut: 9000,
+        fragLoadingMaxRetry: 2,
+        maxBufferLength: 18,
+        maxMaxBufferLength: 40,
       });
 
       hls.loadSource(streamTarget);
@@ -721,7 +518,7 @@ export default function LiveTV() {
     let result = channels;
 
     if (selectedCategory === 'Favoritos') {
-      result = result.filter((c) => favorites.includes(c.url));
+      result = result.filter((c) => favoritesSet.has(c.url));
     } else if (selectedCategory === 'CineSeries') {
       result = result.filter(
         (c) => c.category === 'Películas y Series' || (c.category === 'Pluto TV 24/7' && /cine|pel[ií]culas|movie|film|series/i.test(`${c.rawCategory} ${c.name}`))
@@ -772,7 +569,7 @@ export default function LiveTV() {
 
   // Carruseles horizontales curados estilo Netflix Live
   const netflixLiveRows = useMemo(() => {
-    const favList = channels.filter((c) => favorites.includes(c.url));
+    const favList = channels.filter((c) => favoritesSet.has(c.url));
     const featuredNow = channels
       .filter(
         (c) =>
@@ -1000,17 +797,6 @@ export default function LiveTV() {
   return (
     <div className="pb-16 font-netflix select-none bg-[#141414]">
       {/* 1. ESCENARIO HERO FULL-BLEED ESTILO PRODUCTO NETFLIX LIVE */}
-      {!currentChannel && loading && (
-        <div className="relative w-full h-[68vh] sm:h-[76vh] bg-[#0d0d0d] overflow-hidden flex flex-col items-center justify-center gap-3 pt-16 netflix-shimmer">
-          <div className="w-12 h-12 rounded-full border-4 border-[#E50914]/30 border-t-[#E50914] animate-spin" />
-          <p className="text-sm font-extrabold text-white tracking-wide">
-            Sintonizando parrilla de canales en vivo...
-          </p>
-          <p className="text-xs text-neutral-400">
-            Preparando señales HLS en alta definición
-          </p>
-        </div>
-      )}
       {currentChannel && (
         <div
           ref={playerContainerRef}
@@ -1060,7 +846,7 @@ export default function LiveTV() {
                 : 'opacity-0 translate-y-4 pointer-events-none'
             }`}
           >
-            <div className="flex flex-wrap items-center gap-2.5 animate-heroStagger-1">
+            <div className="flex flex-wrap items-center gap-2.5">
               <div className="flex items-center gap-1.5">
                 <span className="text-[#E50914] font-black text-xl leading-none">N</span>
                 <span className="text-neutral-200 uppercase tracking-[0.25em] text-[11px] font-extrabold">
@@ -1099,7 +885,7 @@ export default function LiveTV() {
               </span>
             </div>
 
-            <div className="flex items-center gap-4 animate-heroStagger-2">
+            <div className="flex items-center gap-4">
               <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-black/80 backdrop-blur-xl border border-white/15 p-2 flex items-center justify-center shrink-0 shadow-2xl">
                 <img
                   src={currentChannel.logo}
@@ -1117,17 +903,17 @@ export default function LiveTV() {
               </h1>
             </div>
 
-            <p className="text-xs sm:text-sm text-neutral-200/90 max-w-lg drop-shadow animate-heroStagger-3">
+            <p className="text-xs sm:text-sm text-neutral-200/90 max-w-lg drop-shadow">
               Señal disponible de <strong className="text-white">{currentChannel.name}</strong>.
               Si una fuente falla, probaremos otra opción del mismo canal.
             </p>
 
             {/* Botones Principales Estilo Netflix */}
-            <div className="flex items-center flex-wrap gap-2.5 pt-1 animate-heroStagger-4">
+            <div className="flex items-center flex-wrap gap-2.5 pt-1">
               <button
                 type="button"
                 onClick={toggleFullscreen}
-                className="hero-primary-cta flex items-center gap-2 px-6 py-2.5 bg-white hover:bg-neutral-200 text-black font-extrabold text-xs sm:text-sm rounded-md shadow-[0_8px_25px_rgba(255,255,255,0.25)]"
+                className="flex items-center gap-2 px-6 py-2.5 bg-white hover:bg-neutral-200 text-black font-extrabold text-xs sm:text-sm rounded-md shadow-[0_8px_25px_rgba(255,255,255,0.25)] transition-all hover:scale-105"
               >
                 {isFullscreen || isFullscreenFallback ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
                 <span>{isFullscreen || isFullscreenFallback ? 'Salir de pantalla completa' : 'Pantalla Completa'}</span>
@@ -1136,7 +922,7 @@ export default function LiveTV() {
               <button
                 type="button"
                 onClick={handlePrevChannel}
-                className="nf-btn flex items-center gap-1.5 px-4 py-2.5 bg-neutral-500/40 hover:bg-neutral-500/60 text-white font-bold text-xs sm:text-sm rounded-md backdrop-blur-md border border-white/15"
+                className="flex items-center gap-1.5 px-4 py-2.5 bg-neutral-500/40 hover:bg-neutral-500/60 text-white font-bold text-xs sm:text-sm rounded-md backdrop-blur-md border border-white/15 transition-all hover:scale-105"
               >
                 <SkipBack className="w-4 h-4" />
                 <span>Canal Ant.</span>
@@ -1145,7 +931,7 @@ export default function LiveTV() {
               <button
                 type="button"
                 onClick={handleNextChannel}
-                className="nf-btn flex items-center gap-1.5 px-4 py-2.5 bg-neutral-500/40 hover:bg-neutral-500/60 text-white font-bold text-xs sm:text-sm rounded-md backdrop-blur-md border border-white/15"
+                className="flex items-center gap-1.5 px-4 py-2.5 bg-neutral-500/40 hover:bg-neutral-500/60 text-white font-bold text-xs sm:text-sm rounded-md backdrop-blur-md border border-white/15 transition-all hover:scale-105"
               >
                 <span>Siguiente</span>
                 <SkipForward className="w-4 h-4" />
@@ -1154,7 +940,7 @@ export default function LiveTV() {
               <button
                 type="button"
                 onClick={() => setShowEpgDrawer((prev) => !prev)}
-                className={`nf-btn flex items-center gap-2 px-4 py-2.5 rounded-md font-bold text-xs sm:text-sm backdrop-blur-md border ${
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-md font-bold text-xs sm:text-sm backdrop-blur-md border transition-all hover:scale-105 ${
                   showEpgDrawer
                     ? 'bg-[#E50914] text-white border-red-400 shadow-lg'
                     : 'bg-black/60 hover:bg-black/80 text-white border-white/20'
@@ -1167,7 +953,7 @@ export default function LiveTV() {
               <button
                 type="button"
                 onClick={(e) => toggleFavorite(currentChannel, e)}
-                className={`nf-btn flex items-center gap-1.5 px-3.5 py-2.5 rounded-md font-bold text-xs sm:text-sm backdrop-blur-md border ${
+                className={`flex items-center gap-1.5 px-3.5 py-2.5 rounded-md font-bold text-xs sm:text-sm backdrop-blur-md border transition-all hover:scale-105 ${
                   isFavorite(currentChannel)
                     ? 'bg-amber-500/25 text-amber-300 border-amber-400/50'
                     : 'bg-black/60 hover:bg-black/80 text-white border-white/20'
@@ -1204,7 +990,7 @@ export default function LiveTV() {
             <button
               type="button"
               onClick={() => setCinemaBoost(!cinemaBoost)}
-              className={`nf-pill px-3 py-2 rounded-full text-xs font-extrabold border backdrop-blur-xl flex items-center gap-1.5 ${
+              className={`px-3 py-2 rounded-full text-xs font-extrabold border backdrop-blur-xl transition flex items-center gap-1.5 ${
                 cinemaBoost
                   ? 'bg-[#E50914]/30 text-red-200 border-[#E50914]'
                   : 'bg-black/65 text-neutral-300 border-white/20'
@@ -1218,7 +1004,7 @@ export default function LiveTV() {
             <button
               type="button"
               onClick={handleLaunchVLC}
-              className="nf-pill px-3.5 py-2 rounded-full bg-orange-600/90 hover:bg-orange-500 text-white text-xs font-extrabold shadow-lg"
+              className="px-3.5 py-2 rounded-full bg-orange-600/90 hover:bg-orange-500 text-white text-xs font-extrabold shadow-lg transition"
             >
               VLC
             </button>
@@ -1245,7 +1031,7 @@ export default function LiveTV() {
             <button
               type="button"
               onClick={togglePiP}
-              className="nf-icon-btn w-9 h-9 rounded-full bg-black/70 hover:bg-white/20 text-white border border-white/20 hidden sm:flex items-center justify-center backdrop-blur-xl"
+              className="w-9 h-9 rounded-full bg-black/70 hover:bg-white/20 text-white border border-white/20 hidden sm:flex items-center justify-center backdrop-blur-xl transition"
               title="Picture-in-Picture"
             >
               <PictureInPicture2 className="w-4 h-4" />
@@ -1256,7 +1042,7 @@ export default function LiveTV() {
           {showEpgDrawer && (
             <div
               onClick={(e) => e.stopPropagation()}
-              className="absolute top-20 right-4 sm:right-8 bottom-20 w-80 sm:w-96 z-40 bg-[#121212]/96 backdrop-blur-3xl border border-white/15 ring-1 ring-[#E50914]/30 rounded-2xl shadow-[0_25px_70px_rgba(0,0,0,0.95)] flex flex-col overflow-hidden animate-nfDrawerRight"
+              className="absolute top-20 right-4 sm:right-8 bottom-20 w-80 sm:w-96 z-40 bg-[#121212]/96 backdrop-blur-3xl border border-white/15 ring-1 ring-[#E50914]/30 rounded-2xl shadow-[0_25px_70px_rgba(0,0,0,0.95)] flex flex-col overflow-hidden animate-fadeIn"
             >
               <div className="p-3.5 border-b border-white/10 flex items-center justify-between bg-black/60">
                 <div className="flex items-center gap-2">
@@ -1281,7 +1067,7 @@ export default function LiveTV() {
                     <div
                       key={`epg-${ch.url}`}
                       onClick={() => handleSelectChannel(ch)}
-                      className={`flex items-center justify-between gap-2.5 p-2.5 rounded-xl cursor-pointer transition-all duration-200 ease-nf-out hover:translate-x-1 ${
+                      className={`flex items-center justify-between gap-2.5 p-2.5 rounded-xl cursor-pointer transition ${
                         active
                           ? 'bg-[#E50914]/25 border border-[#E50914] text-white'
                           : 'hover:bg-white/[0.06] text-neutral-300'
@@ -1415,7 +1201,7 @@ export default function LiveTV() {
       )}
 
       {/* 2. SUB-BARRA DE ORGANIZACIÓN DE GÉNEROS Y REGIONES DE TV ESTILO NETFLIX */}
-      <div className={`relative z-30 px-4 sm:px-8 lg:px-12 max-w-[1480px] mx-auto mb-6 space-y-3.5 ${currentChannel || loading ? '-mt-12 sm:-mt-16' : 'pt-24 sm:pt-28'}`}>
+      <div className="relative z-30 -mt-12 sm:-mt-16 px-4 sm:px-8 lg:px-12 max-w-[1480px] mx-auto mb-6 space-y-3.5">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-[#141414]/92 backdrop-blur-2xl px-5 py-4 rounded-2xl border border-white/10 shadow-2xl">
           <div className="flex flex-wrap items-center gap-4">
             <div className="flex items-center gap-2.5">
@@ -1460,7 +1246,7 @@ export default function LiveTV() {
             <button
               type="button"
               onClick={() => setShowModal(true)}
-              className="nf-btn flex items-center gap-1.5 px-3.5 py-2 bg-[#181818] hover:bg-neutral-800 text-white text-xs font-bold rounded-xl border border-white/15"
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-[#181818] hover:bg-neutral-800 text-white text-xs font-bold rounded-xl border border-white/15 transition"
             >
               <PlusCircle className="w-4 h-4 text-emerald-400" />
               <span className="hidden sm:inline">+ Lista M3U / Xtream</span>
@@ -1472,7 +1258,7 @@ export default function LiveTV() {
               type="button"
               onClick={() => loadChannels(true)}
               disabled={refreshing}
-              className="nf-icon-btn nf-refresh-btn p-2 bg-[#181818] hover:bg-neutral-800 text-neutral-300 hover:text-white rounded-xl border border-white/15"
+              className="p-2 bg-[#181818] hover:bg-neutral-800 text-neutral-300 hover:text-white rounded-xl border border-white/15 transition"
               title="Actualizar señales en vivo"
             >
               <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin text-[#E50914]' : ''}`} />
@@ -1488,7 +1274,7 @@ export default function LiveTV() {
               <button
                 key={tab.id}
                 onClick={() => setSelectedCategory(tab.value)}
-                className={`nf-pill flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap border ${
+                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all duration-200 border ${
                   isSelected
                     ? 'bg-[#E50914] text-white border-red-400 shadow-lg shadow-red-950/50 scale-105'
                     : 'bg-[#181818]/90 hover:bg-neutral-800 text-neutral-300 hover:text-white border-white/[0.08]'
@@ -1508,35 +1294,7 @@ export default function LiveTV() {
       </div>
 
       {/* 3. DISTRIBUCIÓN ORGANIZADA DE CANALES EN CARRUSELES 16:9 ESTILO NETFLIX */}
-      {!loading && channels.length === 0 ? (
-        <div className="px-4 sm:px-8 lg:px-12 max-w-xl mx-auto py-12 text-center animate-panelEnter">
-          <div className="rounded-2xl border border-white/10 bg-neutral-900/70 p-8 space-y-4 shadow-2xl">
-            <AlertCircle className="w-10 h-10 text-[#E50914] mx-auto" />
-            <h3 className="text-lg font-black text-white">
-              {loadError || 'No se encontraron señales en vivo disponibles'}
-            </h3>
-            <p className="text-xs text-neutral-400 leading-relaxed">
-              Pulsa en reintentar para recargar las fuentes públicas o agrega tu propia lista M3U / Xtream.
-            </p>
-            <div className="flex flex-wrap items-center justify-center gap-3 pt-1">
-              <button
-                type="button"
-                onClick={() => loadChannels(true)}
-                className="nf-btn px-5 py-2.5 rounded-xl bg-[#E50914] hover:bg-red-700 text-white text-xs font-extrabold shadow-lg"
-              >
-                Reintentar conexión
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowModal(true)}
-                className="nf-btn px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-bold border border-white/15"
-              >
-                + Agregar Lista M3U / Xtream
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : !loading && selectedCategory === 'Todos' && !searchQuery.trim() ? (
+      {!loading && selectedCategory === 'Todos' && !searchQuery.trim() ? (
         <div className="space-y-1">
           {netflixLiveRows.favList.length > 0 && (
             <ChannelRowCarousel
@@ -1715,26 +1473,16 @@ export default function LiveTV() {
 
       {/* Modal Agregar Lista M3U / Xtream */}
       {showModal && (
-        <div
-          onClick={closeIptvModal}
-          className={`fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 ${
-            modalClosing ? 'animate-nfBackdropOut pointer-events-none' : 'animate-nfBackdrop'
-          }`}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className={`relative w-full max-w-lg bg-[#181818] rounded-2xl overflow-hidden shadow-2xl border border-white/15 p-6 space-y-5 ${
-              modalClosing ? 'animate-modalSlideDown' : 'animate-modalSlideUp'
-            }`}
-          >
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-fadeIn">
+          <div className="relative w-full max-w-lg bg-[#181818] rounded-2xl overflow-hidden shadow-2xl border border-white/15 p-6 space-y-5">
             <div className="flex items-center justify-between border-b border-white/10 pb-3">
               <div className="flex items-center gap-2.5">
                 <PlusCircle className="w-5 h-5 text-emerald-400" />
                 <h3 className="text-lg font-black text-white">Agregar Canales IPTV / M3U</h3>
               </div>
               <button
-                onClick={closeIptvModal}
-                className="nf-icon-btn p-1 rounded-full text-neutral-400 hover:text-white hover:rotate-90"
+                onClick={() => setShowModal(false)}
+                className="text-neutral-400 hover:text-white transition"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -1764,7 +1512,7 @@ export default function LiveTV() {
             </div>
 
             {modalTab === 'm3u' && (
-              <div className="space-y-3 animate-nfTabContent">
+              <div className="space-y-3">
                 <div>
                   <label className="block text-xs font-semibold text-neutral-300 mb-1">
                     URL de la Lista M3U / M3U8:
@@ -1800,7 +1548,7 @@ export default function LiveTV() {
             )}
 
             {modalTab === 'xtream' && (
-              <div className="space-y-3 animate-nfTabContent">
+              <div className="space-y-3">
                 <div>
                   <label className="block text-xs font-semibold text-neutral-300 mb-1">
                     Servidor Xtream (Host y Puerto):

@@ -8,7 +8,8 @@
     "start": "node server.js",
     "dev": "node --watch server.js",
     "test": "node --test tests/*.test.mjs",
-    "check": "node --check server.js && node --check services/downloadService.js && node --check services/addonSources.js && node --check services/extraSiteServers.js && node --check services/cloudHealth.js && node --check services/siteServers.js && node --check services/streamEngine.js && node --check services/mediaTools.js && node --check services/iptvParser.js && node --check services/subtitleService.js && node --check services/aiSubtitles.js"
+    "lint": "node ../lint.mjs",
+    "check": "node --check server.js && node --check services/downloadService.js && node --check services/hlsOffline.js && node --check services/addonSources.js && node --check services/eztv.js && node --check services/extraSiteServers.js && node --check services/cloudHealth.js && node --check services/siteServers.js && node --check services/streamEngine.js && node --check services/mediaTools.js && node --check services/iptvParser.js && node --check services/subtitleService.js && node --check services/aiSubtitles.js"
   },
   "dependencies": {
     "axios": "^1.7.9",

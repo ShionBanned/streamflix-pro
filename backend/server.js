@@ -14,7 +14,17 @@ import subtitleService from './services/subtitleService.js';
 import { extractSubtitleVtt } from './services/mediaTools.js';
 import externalPlayer from './services/externalPlayer.js';
 import fs from 'node:fs';
-import { initDownloads, listDownloads, getDownload, startDownload, deleteDownload, downloadFile, parseDownloadRange } from './services/downloadService.js';
+import {
+  initDownloads,
+  listDownloads,
+  getDownload,
+  startDownload,
+  startBatchDownloads,
+  deleteDownload,
+  downloadFile,
+  parseDownloadRange,
+  OFFLINE_PROFILES,
+} from './services/downloadService.js';
 import { aiAvailable, getAiJob, getAiVtt, publicAiJob, receiveUpload, startP2pJob, startUploadJob } from './services/aiSubtitles.js';
 
 dotenv.config();
@@ -34,14 +44,25 @@ app.use(
 app.use(express.json());
 
 await initDownloads();
+// Precalentar catálogo de TV en vivo en segundo plano al arrancar para respuesta instantánea (0ms)
+void iptvService.prewarmChannels();
+
 const localMutation = (req, res, next) => {
   if (req.headers.origin && !/^http:\/\/(?:localhost|127\.0\.0\.1):(?:4000|5173)$/.test(req.headers.origin)) return res.status(403).json({ error: 'Origen no permitido.' });
   next();
 };
-app.get('/api/downloads', (_req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json({ items: listDownloads() }); });
+app.get('/api/downloads', (_req, res) => { res.setHeader('Cache-Control', 'no-store'); res.json({ items: listDownloads(), profiles: OFFLINE_PROFILES }); });
 app.post('/api/downloads', localMutation, async (req, res) => {
   try { res.status(202).json(await startDownload(req.body || {})); }
   catch (error) { res.status(400).json({ error: error.message }); }
+});
+app.post('/api/downloads/batch', localMutation, async (req, res) => {
+  try {
+    const items = await startBatchDownloads(req.body || {});
+    res.status(202).json({ items, totalQueued: items.length });
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
 });
 app.delete('/api/downloads/:id', localMutation, async (req, res) => {
   try { if (!await deleteDownload(req.params.id)) return res.status(404).json({ error: 'Descarga no encontrada.' }); res.status(204).end(); }
@@ -464,8 +485,13 @@ app.post('/api/player/launch', (req, res) => {
 });
 
 // -------------------------------------------------------------
-// RUTAS MÓDULO C: Televisión en Vivo (Motor IPTV M3U)
+// RUTAS MÓDULO C: Televisión en Vivo (Motor IPTV M3U con SWR Instantáneo)
 // -------------------------------------------------------------
+
+app.post('/api/iptv/prewarm', (_req, res) => {
+  void iptvService.prewarmChannels();
+  res.json({ ok: true });
+});
 
 app.get('/api/iptv/channels', async (req, res) => {
   try {
@@ -584,9 +610,9 @@ app.get('/api/iptv/proxy', async (req, res) => {
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'online',
-    version: '5.3.0',
+    version: '5.4.0',
     capabilities: { ffmpeg: streamEngine.getStatus('').hasFfmpeg, cloudDiagnostics: true, aiSubtitles: aiAvailable() },
-    platform: 'StreamFlix Pro v5.2 — Netflix Ultra Edition ($0 Cost)',
+    platform: 'StreamFlix Pro v5.4 — Netflix Ultra Edition ($0 Cost)',
     timestamp: new Date().toISOString(),
   });
 });
@@ -602,10 +628,7 @@ process.on('unhandledRejection', (reason) => {
 
 app.listen(PORT, '127.0.0.1', () => {
   console.log(`=======================================================`);
-  console.log(`🚀 StreamFlix Pro v5.3 activo en: http://localhost:${PORT}`);
-  console.log(`🎬 Diagnóstico Cloud, reproducción directa y conversión de audio disponibles`);
+  console.log(`🚀 StreamFlix Pro v5.4 activo en: http://localhost:${PORT}`);
+  console.log(`🎬 Compresión Per-Title Offline, Live TV SWR y conversión de audio listos`);
   console.log(`=======================================================`);
-  setTimeout(() => {
-    iptvService.getChannels().catch(() => {});
-  }, 300);
 });

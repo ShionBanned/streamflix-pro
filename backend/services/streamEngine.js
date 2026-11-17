@@ -322,16 +322,36 @@ class StreamEngine {
         inputUrl.searchParams.delete('startTime');
 
         const cached = this.mediaInfo.get(infoKey);
-        const info = (cached && typeof cached.then === 'function') ? await cached : cached;
+        let info = null;
+        if (cached) {
+          try {
+            info = (typeof cached.then === 'function')
+              ? await Promise.race([cached, new Promise((_, reject) => setTimeout(() => reject(new Error('probe timeout')), 4000))])
+              : cached;
+          } catch (_err) {
+            info = null;
+          }
+        }
         if (req.aborted || res.destroyed) return;
         const audioTracks = info?.audioTracks || [];
         const track = selectAudioTrack(audioTracks, { ...req.query, manualAudio: req.query.manualAudio === '1' });
         const startTime = Math.max(0, Math.min(Number(req.query.startTime) || 0, Math.max(0, (info?.duration || 86400) - 0.1)));
+
+        // Si hay salto de tiempo, priorizar la ventana de streaming en WebTorrent
+        if (startTime > 0 && info?.duration && info.duration > 0 && file.length > 0) {
+          const estimatedByte = Math.floor((startTime / info.duration) * file.length);
+          this.prioritizeStreamingWindow(torrent, file, estimatedByte);
+        }
+
+        const mustTranscodeVideo =
+          isHevcOrAvi ||
+          (info?.videoCodec ? ['hevc', 'av1', 'mpeg4', 'mpeg2video'].includes(info.videoCodec) : false);
+
         streamFfmpeg(inputUrl.href, req, res, {
           audioTrack: track,
           startTime,
           audioOffset: Number(req.query.audioOffset || 0),
-          transcodeVideo: isHevcOrAvi || ['hevc', 'av1', 'mpeg4', 'mpeg2video'].includes(info?.videoCodec)
+          transcodeVideo: mustTranscodeVideo,
         });
         return;
       }
@@ -345,6 +365,8 @@ class StreamEngine {
           'Content-Length': totalSize,
           'Content-Type': mimeType,
           'Accept-Ranges': 'bytes',
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Headers': '*',
           'Content-Disposition': `inline; filename="${encodeURIComponent(file.name)}"`,
         });
 
@@ -363,7 +385,7 @@ class StreamEngine {
 
       const parsedRange = parseByteRange(range, totalSize);
       if (parsedRange.status === 416) {
-        res.writeHead(416, { 'Content-Range': 'bytes */' + totalSize }); return res.end();
+        res.writeHead(416, { 'Content-Range': 'bytes */' + totalSize, 'Access-Control-Allow-Origin': '*' }); return res.end();
       }
       const { start, end, length: chunkSize } = parsedRange;
       this.prioritizeStreamingWindow(torrent, file, start);
@@ -373,6 +395,8 @@ class StreamEngine {
         'Accept-Ranges': 'bytes',
         'Content-Length': chunkSize,
         'Content-Type': mimeType,
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': '*',
         'Content-Disposition': `inline; filename="${encodeURIComponent(file.name)}"`,
       });
 

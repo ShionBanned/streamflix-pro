@@ -19,11 +19,6 @@ export default {
         sans: ['Netflix Sans', 'Inter', 'system-ui', '-apple-system', 'sans-serif'],
         netflix: ['Netflix Sans', 'Inter', 'system-ui', '-apple-system', 'sans-serif'],
       },
-      transitionTimingFunction: {
-        'nf-out': 'cubic-bezier(0.16, 1, 0.3, 1)',
-        'nf-spring': 'cubic-bezier(0.22, 1.25, 0.36, 1)',
-        'nf-smooth': 'cubic-bezier(0.25, 0.1, 0.25, 1)',
-      },
     },
   },
   plugins: [],

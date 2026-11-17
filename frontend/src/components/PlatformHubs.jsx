@@ -71,7 +71,7 @@ export default function PlatformHubs({ activeHub, onSelectHub }) {
         {activeHub && (
           <button
             onClick={() => onSelectHub(null)}
-            className="nf-pill px-2.5 py-1 rounded-full bg-red-500/15 border border-red-500/35 text-xs text-red-300 hover:text-white hover:bg-[#E50914] font-semibold flex items-center gap-1 animate-capsule-icon"
+            className="text-xs text-red-400 hover:text-red-300 font-semibold transition flex items-center gap-1"
           >
             <span>Ver todo el catálogo</span>
             <span>✕</span>
@@ -79,7 +79,7 @@ export default function PlatformHubs({ activeHub, onSelectHub }) {
         )}
       </div>
 
-      <div className="flex gap-2.5 overflow-x-auto no-scrollbar pb-2 pt-1">
+      <div className="flex gap-2.5 overflow-x-auto no-scrollbar pb-2">
         {PLATFORMS.map((platform) => {
           const isSelected = activeHub?.id === platform.id;
           return (
@@ -87,34 +87,18 @@ export default function PlatformHubs({ activeHub, onSelectHub }) {
               key={platform.id}
               onClick={() => onSelectHub(isSelected ? null : platform)}
               aria-pressed={isSelected}
-              className={`platform-hub group relative min-w-[145px] sm:min-w-[172px] py-3 px-3.5 rounded-md border text-left flex items-center justify-between overflow-hidden ${
-                isSelected
-                  ? 'bg-[#292929] border-white/75 shadow-[0_12px_30px_rgba(0,0,0,0.8)] scale-[1.02]'
-                  : 'bg-[#1b1b1b] border-white/10 hover:bg-[#262626] hover:border-white/30'
-              }`}
+              className={`platform-hub group relative min-w-[145px] sm:min-w-[172px] py-3 px-3.5 rounded-md border transition-all duration-300 text-left flex items-center justify-between overflow-hidden hover:-translate-y-1 hover:shadow-xl ${isSelected ? 'bg-[#292929] border-white/70 shadow-lg' : 'bg-[#1b1b1b] border-white/10 hover:bg-[#292929] hover:border-white/30'}`}
             >
-              <span
-                className={`absolute left-0 top-0 bottom-0 transition-all duration-300 ease-nf-out ${
-                  isSelected ? 'w-1.5 opacity-100' : 'w-1 opacity-75 group-hover:w-1.5 group-hover:opacity-100'
-                }`}
-                style={{
-                  backgroundColor: platform.color,
-                  boxShadow: isSelected ? `0 0 14px ${platform.color}` : 'none',
-                }}
-              />
-              <div className="pl-1">
+              <span className="absolute left-0 top-0 bottom-0 w-0.5 opacity-70 group-hover:opacity-100 transition-opacity" style={{ backgroundColor: platform.color }} />
+              <div>
                 <span className="block text-xs sm:text-sm font-bold text-white tracking-wide font-netflix">
                   {platform.name}
                 </span>
-                <span className="text-[10px] font-medium text-neutral-400 group-hover:text-neutral-200 transition-colors">
+                <span className="text-[10px] font-medium text-neutral-400">
                   {isSelected ? 'Seleccionado' : 'Ver títulos'}
                 </span>
               </div>
-              <ChevronRight
-                className={`w-4 h-4 transition-transform duration-300 ease-nf-spring group-hover:translate-x-1 ${
-                  isSelected ? 'text-white translate-x-0.5' : 'text-neutral-500 group-hover:text-white'
-                }`}
-              />
+              <ChevronRight className={`w-4 h-4 transition-transform group-hover:translate-x-1 ${isSelected ? 'text-white' : 'text-neutral-500'}`} />
             </button>
           );
         })}

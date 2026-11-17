@@ -1,7 +1,19 @@
 const HOSTS = { pelisplus: 'pelisplushd.la', animeflv: 'animeflv.or.at' };
 const HEADERS = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36', Accept: 'text/html' };
+const searchCache = new Map();
 
-function decodeHtml(value = '') { return value.replace(/&amp;/gi, '&').replace(/&quot;/gi, '"').replace(/&#39;|&#x27;/gi, "'").replace(/<[^>]+>/g, '').trim(); }
+function decodeHtml(value = '') {
+  let str = value.replace(/&amp;/gi, '&').replace(/&quot;/gi, '"').replace(/&#39;|&#x27;/gi, "'").replace(/<[^>]+>/g, '').trim();
+  try {
+    if (/[\u00c0-\u00ff]/.test(str)) {
+      const decoded = decodeURIComponent(escape(str));
+      if (decoded && !decoded.includes('\ufffd')) str = decoded;
+    }
+  } catch {
+    str = str.replace(/Ã¡/g, 'á').replace(/Ã©/g, 'é').replace(/Ã­/g, 'í').replace(/Ã³/g, 'ó').replace(/Ãº/g, 'ú').replace(/Ã±/g, 'ñ').replace(/Ã/g, 'í');
+  }
+  return str.trim();
+}
 function normalized(value) { return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); }
 function score(query, title) {
   const a = normalized(query); const b = normalized(title);
@@ -69,12 +81,34 @@ export function parseExtraSearch(source, html, query) {
 }
 export async function searchExtraSite(source, query, { fetchImpl = fetch } = {}) {
   if (!HOSTS[source] || typeof query !== 'string' || query.trim().length < 2 || query.length > 120) throw new Error('Escribe un título de 2 a 120 caracteres.');
-  const url = source === 'pelisplus' ? `https://${HOSTS[source]}/search?s=${encodeURIComponent(query.trim())}` : `https://${HOSTS[source]}/?s=${encodeURIComponent(query.trim())}`;
-  const response = await fetchImpl(url, { redirect: 'manual', signal: AbortSignal.timeout(10000), headers: HEADERS });
-  if (!response.ok || !(response.headers.get('content-type') || '').includes('text/html')) throw new Error('No se pudo buscar en esta fuente.');
-  const body = await response.text();
-  if (body.length > 1_000_000) throw new Error('La búsqueda devolvió demasiado contenido.');
-  return { source, query: query.trim(), candidates: parseExtraSearch(source, body, query), checkedAt: Date.now() };
+  const key = `${source}:${normalized(query)}`;
+  const cached = searchCache.get(key);
+  if (cached && Date.now() - cached.at < 5 * 60_000) return cached.value;
+
+  const base = source === 'pelisplus' ? `https://${HOSTS[source]}/search?s=` : `https://${HOSTS[source]}/?s=`;
+  const clean = query.replace(/[:\-–—]/g, ' ').replace(/\s+/g, ' ').trim();
+  const mainPart = query.split(/[:\-–—]/)[0].trim();
+  const terms = normalized(query).split(' ').filter(word => word.length > 3 && !['para', 'the', 'with', 'from', 'temporada'].includes(word));
+  const longestWord = terms.sort((a, b) => b.length - a.length)[0];
+
+  const searches = [query.trim(), clean, mainPart, longestWord].filter((value, index, list) => value && value.length >= 2 && list.indexOf(value) === index);
+
+  let candidates = [];
+  for (const term of searches) {
+    try {
+      const response = await fetchImpl(`${base}${encodeURIComponent(term)}`, { redirect: 'manual', signal: AbortSignal.timeout(10000), headers: HEADERS });
+      if (!response.ok || !(response.headers.get('content-type') || '').includes('text/html')) continue;
+      const body = await response.text();
+      if (body.length > 1_000_000) continue;
+      candidates = parseExtraSearch(source, body, query);
+      if (candidates.length) break;
+    } catch { /* Try next fallback search */ }
+  }
+
+  const value = { source, query: query.trim(), candidates, checkedAt: Date.now() };
+  if (searchCache.size >= 50) searchCache.delete(searchCache.keys().next().value);
+  searchCache.set(key, { at: Date.now(), value });
+  return value;
 }
 export async function resolveExtraSite(source, input, season, episode, { fetchImpl = fetch } = {}) {
   const titleUrl = validateExtraSiteUrl(source, input, 'title');

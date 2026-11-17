@@ -11,6 +11,7 @@ const apiClient = axios.create({
 // Caché en memoria del cliente (Frontend) para transiciones de pestaña en 0ms
 const clientCache = new Map();
 const CLIENT_CACHE_TTL = 10 * 60 * 1000;
+const IPTV_SESSION_STORAGE_KEY = 'streamflix_iptv_channels_snapshot_v2';
 
 apiClient.interceptors.response.use(
   (response) => response,
@@ -77,10 +78,58 @@ export const api = {
     return res.data.items || [];
   },
 
-  async startDownload(source, title, quality = 'compact') {
-    const payload = typeof source === 'string' ? { url: source, title, quality } : { ...source, title, quality };
-    const res = await apiClient.post('/downloads', payload);
-    return res.data;
+  async startDownload(source, title, quality = 'compact', preferredLanguage = 'latino', allowQueue = false) {
+    const payload =
+      typeof source === 'string'
+        ? { url: source, title, quality, preferredLanguage, allowQueue }
+        : { ...source, title, quality, preferredLanguage, allowQueue };
+    try {
+      const res = await apiClient.post('/downloads', payload);
+      return res.data;
+    } catch (err) {
+      // Si el backend en memoria es de una sesión previa que aún no conoce quality="marathon", reintentar con "compact"
+      if (err.response?.status === 400 && quality === 'marathon') {
+        const retryPayload = { ...payload, quality: 'compact' };
+        const res = await apiClient.post('/downloads', retryPayload);
+        return res.data;
+      }
+      throw err;
+    }
+  },
+
+  async startBatchDownloads(items, quality = 'marathon', preferredLanguage = 'latino') {
+    try {
+      const res = await apiClient.post('/downloads/batch', {
+        items,
+        quality,
+        preferredLanguage,
+      });
+      return res.data;
+    } catch (err) {
+      if (err.response?.status === 404 || err.response?.status === 400) {
+        // Fallback automático compatible con procesos de backend antiguos sin reiniciar:
+        const fallbackQuality = quality === 'marathon' ? 'compact' : quality;
+        const created = [];
+        for (const entry of items.slice(0, 2)) {
+          try {
+            const { title, quality: _q, preferredLanguage: _l, ...source } = entry;
+            const started = await this.startDownload(
+              source,
+              title,
+              fallbackQuality,
+              preferredLanguage,
+              true
+            );
+            created.push(started);
+          } catch (innerErr) {
+            if (!created.length) throw innerErr;
+            break;
+          }
+        }
+        return { items: created, totalQueued: created.length, fallbackUsed: true };
+      }
+      throw err;
+    }
   },
 
   async deleteDownload(id) {
@@ -223,7 +272,7 @@ export const api = {
     try {
       base = (await cachedGet('/tmdb/movie-sections', { lang })) || {};
     } catch {
-      base = {};
+      // Se completan las secciones con fuentes de respaldo.
     }
 
     // Garantizar que todas las filas de géneros de películas estén pobladas (con clásicos integrados pasivamente)
@@ -276,7 +325,7 @@ export const api = {
     try {
       base = (await cachedGet('/tmdb/series-sections', { lang })) || {};
     } catch {
-      base = {};
+      // Se completan las secciones con fuentes de respaldo.
     }
 
     const [
@@ -327,7 +376,7 @@ export const api = {
     try {
       base = (await cachedGet('/tmdb/anime-sections', { lang })) || {};
     } catch {
-      base = {};
+      // Se completan las secciones con fuentes de respaldo.
     }
 
     const [page1, page2, page3] = await Promise.all([
@@ -478,7 +527,43 @@ export const api = {
     return res.data?.subtitles || [];
   },
 
+  getCachedIptvSnapshot() {
+    const mem = clientCache.get('iptv:default');
+    if (mem?.data?.channels?.length) return mem.data;
+    try {
+      const raw = sessionStorage.getItem(IPTV_SESSION_STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed?.channels?.length) return parsed;
+      }
+    } catch {
+      // Ignorar fallos de sessionStorage
+    }
+    return null;
+  },
+
+  prefetchIptvChannels() {
+    const mem = clientCache.get('iptv:default');
+    if (mem && Date.now() - mem.time < CLIENT_CACHE_TTL) return;
+    this.getIptvChannels().catch(() => {});
+  },
+
   async getIptvChannels({ country, category, refresh = false, includeHidden = false, customUrls = [], xtream = null } = {}) {
+    const isDefaultQuery =
+      !country &&
+      !category &&
+      !refresh &&
+      !includeHidden &&
+      customUrls.length === 0 &&
+      !xtream?.server;
+
+    if (isDefaultQuery) {
+      const cached = clientCache.get('iptv:default');
+      if (cached && Date.now() - cached.time < CLIENT_CACHE_TTL) {
+        return cached.data;
+      }
+    }
+
     const params = {};
     if (country) params.country = country;
     if (category) params.category = category;
@@ -491,8 +576,25 @@ export const api = {
       params.password = xtream.password;
     }
 
-    const res = await apiClient.get('/iptv/channels', { params, timeout: 30000 });
-    return res.data;
+    const res = await apiClient.get('/iptv/channels', { params, timeout: 15000 });
+    const data = res.data;
+
+    if (isDefaultQuery && data?.channels?.length) {
+      clientCache.set('iptv:default', { data, time: Date.now() });
+      try {
+        sessionStorage.setItem(
+          IPTV_SESSION_STORAGE_KEY,
+          JSON.stringify({
+            total: data.total,
+            hiddenCount: data.hiddenCount || 0,
+            channels: data.channels.slice(0, 600),
+          })
+        );
+      } catch {
+        // Ignorar cuota de sessionStorage
+      }
+    }
+    return data;
   },
 
   async reportIptvHealth(sourceId, outcome) {

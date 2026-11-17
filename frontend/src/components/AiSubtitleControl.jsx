@@ -39,65 +39,15 @@ export default function AiSubtitleControl({ p2p = null, onReady }) {
     } catch (error) { setMessage(error.message); }
   };
 
-  return (
-    <div
-      className="space-y-2 rounded-lg border border-white/15 bg-black/50 p-2.5 text-xs text-white animate-nfAccordion"
-      onClick={(event) => event.stopPropagation()}
-    >
-      <div className="font-semibold">Subtítulos con IA · Whisper local</div>
-      <label className="flex items-center justify-between gap-2">
-        <span>Idioma del audio</span>
-        <select
-          className="bg-neutral-800 border border-white/10 p-1 rounded text-white focus:border-[#E50914] outline-none transition-colors"
-          value={language}
-          onChange={(event) => setLanguage(event.target.value)}
-        >
-          <option value="auto">Detectar</option>
-          <option value="es">Español</option>
-          <option value="en">Inglés</option>
-          <option value="pt">Portugués</option>
-          <option value="fr">Francés</option>
-          <option value="ja">Japonés</option>
-          <option value="ko">Coreano</option>
-        </select>
-      </label>
-      <div className="flex flex-wrap items-center gap-2">
-        {p2p && (
-          <button
-            disabled={job && !['done', 'error'].includes(job.status)}
-            className="nf-btn rounded bg-[#E50914] hover:bg-red-700 px-2.5 py-1 font-semibold disabled:opacity-50"
-            onClick={() => create()}
-          >
-            Generar desde esta pista
-          </button>
-        )}
-        <label className="nf-btn cursor-pointer rounded bg-neutral-700 hover:bg-neutral-600 px-2.5 py-1 font-semibold">
-          Elegir archivo de audio/video
-          <input
-            type="file"
-            accept="audio/*,video/*,.mkv"
-            className="hidden"
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              event.target.value = '';
-              if (file) create(file);
-            }}
-          />
-        </label>
-      </div>
-      {job && (
-        <p role="status" className="text-emerald-300 font-semibold animate-nfTabContent">
-          {job.status === 'extracting'
-            ? 'Extrayendo audio…'
-            : job.status === 'transcribing'
-            ? 'Transcribiendo…'
-            : job.status === 'done'
-            ? 'Subtítulos listos.'
-            : job.error || 'Procesando…'}
-        </p>
-      )}
-      {message && <p className="text-neutral-300 animate-nfTabContent">{message}</p>}
-      <p className="text-neutral-400">Usa el mismo corte y pista de audio que el video. Puedes ajustar el desfase después.</p>
+  return <div className="space-y-2 rounded-lg border border-white/15 bg-black/50 p-2 text-xs text-white" onClick={event => event.stopPropagation()}>
+    <div className="font-semibold">Subtítulos con IA · Whisper local</div>
+    <label>Idioma del audio <select className="ml-1 bg-neutral-800 p-1 rounded" value={language} onChange={event => setLanguage(event.target.value)}><option value="auto">Detectar</option><option value="es">Español</option><option value="en">Inglés</option><option value="pt">Portugués</option><option value="fr">Francés</option><option value="ja">Japonés</option><option value="ko">Coreano</option></select></label>
+    <div className="flex flex-wrap items-center gap-2">
+      {p2p && <button disabled={job && !['done', 'error'].includes(job.status)} className="rounded bg-red-700 px-2 py-1 disabled:opacity-50" onClick={() => create()}>Generar desde esta pista</button>}
+      <label className="cursor-pointer rounded bg-neutral-700 px-2 py-1">Elegir archivo de audio/video<input type="file" accept="audio/*,video/*,.mkv" className="hidden" onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) create(file); }} /></label>
     </div>
-  );
+    {job && <p role="status">{job.status === 'extracting' ? 'Extrayendo audio…' : job.status === 'transcribing' ? 'Transcribiendo…' : job.status === 'done' ? 'Subtítulos listos.' : job.error || 'Procesando…'}</p>}
+    {message && <p className="text-neutral-300">{message}</p>}
+    <p className="text-neutral-400">Usa el mismo corte y pista de audio que el video. Puedes ajustar el desfase después.</p>
+  </div>;
 }

@@ -1,5 +1,13 @@
 import { pipeline } from 'node:stream/promises';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import http from 'node:http';
+import https from 'node:https';
 import axios from 'axios';
+
+// Agentes HTTP/HTTPS con Keep-Alive para acelerar descargas M3U y proxy de segmentos HLS/TS
+const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 64, timeout: 10000 });
+const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 64, timeout: 10000 });
 
 // -------------------------------------------------------------
 // 1. Fuentes Oficiales Públicas y Canales FAST 24/7
@@ -26,133 +34,18 @@ export const COUNTRY_NAMES = {
   'es-global': 'Internacional',
 };
 
-export const FALLBACK_LIVE_CHANNELS = [
-  {
-    id: 'dw-espanol',
-    name: 'DW Español',
-    fullName: 'DW Español (1080p)',
-    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/75/Deutsche_Welle_symbol_2012.svg/512px-Deutsche_Welle_symbol_2012.svg.png',
-    category: 'Noticias',
-    rawCategory: 'News',
-    country: 'es-global',
-    countryName: 'Internacional',
-    source: 'Oficial FAST',
-    quality: '1080P',
-    isHevcHint: false,
-    isGeoBlocked: false,
-    url: 'https://dwamdstream104.akamaized.net/hls/live/2015530/dwstream104/index.m3u8',
-  },
-  {
-    id: 'france24-es',
-    name: 'France 24 Español',
-    fullName: 'France 24 Español HD',
-    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/8a/France24.png/512px-France24.png',
-    category: 'Noticias',
-    rawCategory: 'News',
-    country: 'es-global',
-    countryName: 'Internacional',
-    source: 'Oficial FAST',
-    quality: '1080P',
-    isHevcHint: false,
-    isGeoBlocked: false,
-    url: 'https://amg00106-france24-france24-spanish-ay859.amagi.tv/playlist/amg00106-france24-france24-spanish-ay859/playlist.m3u8',
-  },
-  {
-    id: 'rtve-24h',
-    name: 'Canal 24 Horas RTVE',
-    fullName: 'Canal 24 Horas España',
-    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/07/Logo_TVE-24h.svg/512px-Logo_TVE-24h.svg.png',
-    category: 'España',
-    rawCategory: 'News;Spain',
-    country: 'es',
-    countryName: 'España',
-    source: 'RTVE Directo',
-    quality: '1080P',
-    isHevcHint: false,
-    isGeoBlocked: false,
-    url: 'https://ztnr.rtve.es/ztnr/1694255.m3u8',
-  },
-  {
-    id: 'redbull-tv',
-    name: 'Red Bull TV',
-    fullName: 'Red Bull TV Deportes & Aventura 24/7',
-    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c5/Red_Bull_ GmbH_logo.svg/512px-Red_Bull_GmbH_logo.svg.png',
-    category: 'Deportes',
-    rawCategory: 'Sports',
-    country: 'global',
-    countryName: 'Internacional',
-    source: 'Red Bull Media',
-    quality: '1080P',
-    isHevcHint: false,
-    isGeoBlocked: false,
-    url: 'https://rbmn-live.akamaized.net/hls/live/590964/BoRB-AT/master.m3u8',
-  },
-  {
-    id: 'pluto-cine-accion',
-    name: 'Pluto TV Cine Acción',
-    fullName: 'Pluto TV Cine Acción 24/7',
-    logo: 'https://ui-avatars.com/api/?name=Cine+Accion&background=E50914&color=fff&size=128&bold=true',
-    category: 'Películas y Series',
-    rawCategory: 'Movies',
-    country: 'latam',
-    countryName: 'Latinoamérica',
-    source: 'Pluto TV',
-    quality: 'HD',
-    isHevcHint: false,
-    isGeoBlocked: false,
-    url: 'https://service-stitcher.clusters.pluto.tv/v1/stitch/embed/hls/channel/5dcde06574449f0009096f6b/master.m3u8?advertisingId=channel&appName=rokuchannel&appVersion=1.0&bmodel=bm1&channel_id=channel&content=channel&content_rating=ROKU_ADS_CONTENT_RATING&content_type=livefeed&coppa=false&deviceDNT=1&deviceId=channel&deviceMake=rokuChannel&deviceModel=web&deviceType=rokuChannel&deviceVersion=1.0&embedPartner=rokuChannel&genre=ROKU_ADS_CONTENT_GENRE&is_lat=1&platform=web&rdid=channel&studio_id=viacom&tags=ROKU_CONTENT_TAGS',
-  },
-  {
-    id: 'pluto-cine-estelar',
-    name: 'Pluto TV Cine Estelar',
-    fullName: 'Pluto TV Cine Estelar 24/7',
-    logo: 'https://ui-avatars.com/api/?name=Cine+Estelar&background=E50914&color=fff&size=128&bold=true',
-    category: 'Películas y Series',
-    rawCategory: 'Movies',
-    country: 'latam',
-    countryName: 'Latinoamérica',
-    source: 'Pluto TV',
-    quality: 'HD',
-    isHevcHint: false,
-    isGeoBlocked: false,
-    url: 'https://service-stitcher.clusters.pluto.tv/v1/stitch/embed/hls/channel/5dcddf1ed95e74000997f61e/master.m3u8?advertisingId=channel&appName=rokuchannel&appVersion=1.0&bmodel=bm1&channel_id=channel&content=channel&content_rating=ROKU_ADS_CONTENT_RATING&content_type=livefeed&coppa=false&deviceDNT=1&deviceId=channel&deviceMake=rokuChannel&deviceModel=web&deviceType=rokuChannel&deviceVersion=1.0&embedPartner=rokuChannel&genre=ROKU_ADS_CONTENT_GENRE&is_lat=1&platform=web&rdid=channel&studio_id=viacom&tags=ROKU_CONTENT_TAGS',
-  },
-  {
-    id: 'pluto-anime',
-    name: 'Pluto TV Anime 24/7',
-    fullName: 'Pluto TV Anime',
-    logo: 'https://ui-avatars.com/api/?name=Anime+24/7&background=F47521&color=fff&size=128&bold=true',
-    category: 'Infantil y Anime',
-    rawCategory: 'Anime',
-    country: 'latam',
-    countryName: 'Latinoamérica',
-    source: 'Pluto TV',
-    quality: 'HD',
-    isHevcHint: false,
-    isGeoBlocked: false,
-    url: 'https://service-stitcher.clusters.pluto.tv/v1/stitch/embed/hls/channel/5e836e363390d00007f82a02/master.m3u8?advertisingId=channel&appName=rokuchannel&appVersion=1.0&bmodel=bm1&channel_id=channel&content=channel&content_rating=ROKU_ADS_CONTENT_RATING&content_type=livefeed&coppa=false&deviceDNT=1&deviceId=channel&deviceMake=rokuChannel&deviceModel=web&deviceType=rokuChannel&deviceVersion=1.0&embedPartner=rokuChannel&genre=ROKU_ADS_CONTENT_GENRE&is_lat=1&platform=web&rdid=channel&studio_id=viacom&tags=ROKU_CONTENT_TAGS',
-  },
-  {
-    id: 'telemedellin-co',
-    name: 'Telemedellín',
-    fullName: 'Telemedellín Colombia HD',
-    logo: 'https://ui-avatars.com/api/?name=Telemedellin&background=d97706&color=fff&size=128&bold=true',
-    category: 'Colombia',
-    rawCategory: 'Colombia',
-    country: 'co',
-    countryName: 'Colombia',
-    source: 'Señal Abierta CO',
-    quality: '1080P',
-    isHevcHint: false,
-    isGeoBlocked: false,
-    url: 'https://str.telemedellin.tv/hls/telemedellin.m3u8',
-  },
-];
+const DISK_CACHE_FILE = path.resolve(process.cwd(), '.local', 'iptv-channels-cache.json');
+const CACHE_TTL = 20 * 60 * 1000; // 20 minutos de frescura en memoria
+const DISK_CACHE_MAX_AGE = 24 * 60 * 60 * 1000; // Hasta 24h válido para arranque instantáneo SWR
+const SOURCE_FETCH_TIMEOUT = 6500; // Reducido de 15s a 6.5s para que ninguna lista lenta bloquee
 
-let aggregatedCache = null;
+let aggregatedCache = null; // Canales base ya deduplicados y agrupados por groupDuplicateChannels
 let lastCacheTime = 0;
-const CACHE_TTL = 10 * 60 * 1000;
+let refreshInFlight = null;
+let diskCacheLoaded = false;
+let diskCacheWrite = Promise.resolve();
 const sourceChannelCache = new Map();
+const manifestProxyCache = new Map(); // Caché ultrarrápida de manifiestos HLS reescritos (TTL 2s)
 
 export function normalizeCategory(rawGroup = '', channelName = '', channelUrl = '', sourceName = '') {
   const text = `${rawGroup} ${channelName} ${channelUrl} ${sourceName}`.toLowerCase();
@@ -173,9 +66,22 @@ export function normalizeCategory(rawGroup = '', channelName = '', channelUrl = 
     return 'Deportes';
   }
 
-  if (/24\s*\/?\s*7|forensic|misterios|naturaleza|wildlife|animal|cartoonito|nick jr/i.test(`${rawGroup} ${channelName}`) && !/not 24\s*\/?\s*7/i.test(channelName)) return 'Temáticos 24/7';
+  if (
+    /24\s*\/?\s*7|forensic|misterios|naturaleza|wildlife|animal|cartoonito|nick jr/i.test(
+      `${rawGroup} ${channelName}`
+    ) &&
+    !/not 24\s*\/?\s*7/i.test(channelName)
+  ) {
+    return 'Temáticos 24/7';
+  }
 
-  if (/kids|infantil|anime|animation|animaci[oó]n|cartoon|nickelodeon|discovery kids|toons/i.test(`${rawGroup} ${channelName}`)) return 'Infantil y Anime';
+  if (
+    /kids|infantil|anime|animation|animaci[oó]n|cartoon|nickelodeon|discovery kids|toons/i.test(
+      `${rawGroup} ${channelName}`
+    )
+  ) {
+    return 'Infantil y Anime';
+  }
 
   if (
     text.includes('movie') ||
@@ -234,7 +140,14 @@ export function normalizeCategory(rawGroup = '', channelName = '', channelUrl = 
     return 'Música';
   }
 
-  if (text.includes('pluto.tv') || text.includes('jmp2.uk/plu-') || text.includes('plutotv') || sourceName === 'Pluto TV') return 'Pluto TV 24/7';
+  if (
+    text.includes('pluto.tv') ||
+    text.includes('jmp2.uk/plu-') ||
+    text.includes('plutotv') ||
+    sourceName === 'Pluto TV'
+  ) {
+    return 'Pluto TV 24/7';
+  }
 
   if (sourceName === 'Colombia' || text.includes('colombia')) return 'Colombia';
   if (sourceName === 'México' || text.includes('méxico') || text.includes('mexico')) return 'México';
@@ -271,7 +184,8 @@ export function parseM3UContent(content = '', sourceInfo = {}) {
 
       const rawCategory = groupMatch ? groupMatch[1].trim() : '';
       const idCountry = /\.([a-z]{2})(?:@|$)/i.exec(idMatch?.[1] || '')?.[1]?.toLowerCase();
-      const countryCode = (countryMatch?.[1].split(/[;,]/)[0].toLowerCase() || idCountry || sourceInfo.country) || 'global';
+      const countryCode =
+        countryMatch?.[1].split(/[;,]/)[0].toLowerCase() || idCountry || sourceInfo.country || 'global';
 
       current = {
         id: idMatch ? idMatch[1] : `ch-${Math.random().toString(36).substring(2, 9)}`,
@@ -327,21 +241,48 @@ export function groupDuplicateChannels(channels) {
   const grouped = new Map();
   for (const channel of channels) {
     if (!channel?.url || !channel?.name) continue;
-    const name = channel.name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+    const name = channel.name
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
       .replace(/\b(?:4k|2160p|1080p|720p|576p|480p|fhd|uhd|hd|sd|hevc|h265|opci[oó]n\s*\d+|opc\s*\d+)\b/gi, '')
-      .replace(/[^a-z0-9]+/g, ' ').trim();
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim();
     const id = String(channel.id || '').replace(/@(?:HD|SD|FHD|UHD|4K|\d+p)$/i, '').toLowerCase();
     const identity = id && !id.startsWith('ch-') ? `id:${id}` : `name:${name}`;
     const key = `${channel.country || ''}:${channel.category || ''}:${identity}`;
     if (!name) continue;
     if (!grouped.has(key)) grouped.set(key, { ...channel, sources: [] });
     const entry = grouped.get(key);
-    if (!entry.sources.some(source => source.url === channel.url)) {
-      entry.sources.push({ url: channel.url, quality: channel.quality || 'Auto', source: channel.source || 'M3U', userAgent: channel.userAgent || null, referrer: channel.referrer || null, isHevcHint: Boolean(channel.isHevcHint) });
+    const existingSources = Array.isArray(channel.sources) && channel.sources.length
+      ? channel.sources
+      : [
+          {
+            url: channel.url,
+            quality: channel.quality || 'Auto',
+            source: channel.source || 'M3U',
+            userAgent: channel.userAgent || null,
+            referrer: channel.referrer || null,
+            isHevcHint: Boolean(channel.isHevcHint),
+          },
+        ];
+    for (const src of existingSources) {
+      if (src?.url && !entry.sources.some((s) => s.url === src.url)) {
+        entry.sources.push({
+          url: src.url,
+          quality: src.quality || 'Auto',
+          source: src.source || 'M3U',
+          userAgent: src.userAgent || null,
+          referrer: src.referrer || null,
+          isHevcHint: Boolean(src.isHevcHint),
+        });
+      }
     }
-    if ((!entry.logo || entry.logo.includes('ui-avatars.com')) && channel.logo) entry.logo = channel.logo;
+    if ((!entry.logo || entry.logo.includes('ui-avatars.com')) && channel.logo) {
+      entry.logo = channel.logo;
+    }
   }
-  return [...grouped.values()].map(channel => {
+  return [...grouped.values()].map((channel) => {
     channel.sources.sort((a, b) => Number(a.isHevcHint) - Number(b.isHevcHint));
     channel.url = channel.sources[0].url;
     channel.isHevcHint = channel.sources[0].isHevcHint;
@@ -349,15 +290,166 @@ export function groupDuplicateChannels(channels) {
   });
 }
 
+async function loadDiskCacheIfAvailable() {
+  if (diskCacheLoaded) return;
+  diskCacheLoaded = true;
+  try {
+    const raw = await fs.readFile(DISK_CACHE_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (
+      Array.isArray(parsed?.channels) &&
+      parsed.channels.length > 0 &&
+      Date.now() - (parsed.updatedAt || 0) < DISK_CACHE_MAX_AGE
+    ) {
+      aggregatedCache = parsed.channels;
+      lastCacheTime = parsed.updatedAt || Date.now() - CACHE_TTL + 60_000;
+    }
+  } catch {
+    // Sin caché previo en disco
+  }
+}
+
+async function saveDiskCache(channels, updatedAt) {
+  diskCacheWrite = diskCacheWrite.catch(() => {}).then(async () => {
+    await fs.mkdir(path.dirname(DISK_CACHE_FILE), { recursive: true });
+    const tmp = `${DISK_CACHE_FILE}.tmp`;
+    await fs.writeFile(tmp, JSON.stringify({ updatedAt, channels }), 'utf8');
+    await fs.rename(tmp, DISK_CACHE_FILE);
+  });
+  try { await diskCacheWrite; } catch { /* La caché se reconstruye desde las listas. */ }
+}
+
+function rebuildAggregatedCache(now = Date.now(), isComplete = false) {
+  const seenUrls = new Set();
+  const merged = [];
+  for (const src of DEFAULT_M3U_SOURCES) {
+    const entry = sourceChannelCache.get(src.url);
+    if (entry && Array.isArray(entry.channels)) {
+      for (const channel of entry.channels) {
+        const normUrl = channel.url.toLowerCase().trim();
+        if (!seenUrls.has(normUrl)) {
+          seenUrls.add(normUrl);
+          merged.push(channel);
+        }
+      }
+    }
+  }
+  if (merged.length > 0) {
+    merged.sort((a, b) => Number(Boolean(a.isHevcHint)) - Number(Boolean(b.isHevcHint)));
+    const groupedBase = groupDuplicateChannels(merged);
+    aggregatedCache = groupedBase;
+    lastCacheTime = isComplete ? now : now - CACHE_TTL + 60_000;
+    if (isComplete || groupedBase.length >= 80) {
+      void saveDiskCache(groupedBase, lastCacheTime);
+    }
+  }
+  return aggregatedCache || [];
+}
+
+async function refreshBaseChannelsInBackground(forceRefresh = false) {
+  if (refreshInFlight && !forceRefresh) return refreshInFlight;
+
+  let resolveFirstWave;
+  const firstWavePromise = new Promise((resolve) => {
+    resolveFirstWave = resolve;
+  });
+  let settledCount = 0;
+  let firstWaveResolved = false;
+
+  const task = (async () => {
+    const now = Date.now();
+    const fetchPromises = DEFAULT_M3U_SOURCES.map(async (src) => {
+      const saved = sourceChannelCache.get(src.url);
+      if (!forceRefresh && saved && now - saved.at < CACHE_TTL) {
+        settledCount++;
+        if (!firstWaveResolved && settledCount >= 2 && aggregatedCache?.length) {
+          firstWaveResolved = true;
+          resolveFirstWave(aggregatedCache);
+        }
+        return saved.channels;
+      }
+      try {
+        const res = await axios.get(src.url, {
+          timeout: SOURCE_FETCH_TIMEOUT,
+          httpAgent,
+          httpsAgent,
+          headers: {
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          },
+        });
+        const parsed = parseM3UContent(res.data, src);
+        if (!parsed.length) throw new Error('Lista sin canales');
+        sourceChannelCache.set(src.url, { channels: parsed, at: now });
+        // Actualizar caché incrementalmente apenas llega una lista rápida (ej. Colombia o Español)
+        const partial = rebuildAggregatedCache(now, false);
+        if (!firstWaveResolved && partial.length >= 30) {
+          firstWaveResolved = true;
+          resolveFirstWave(partial);
+        }
+        return parsed;
+      } catch (err) {
+        console.warn(`[IPTV Aggregator] Fuente omitida (${src.name}):`, err.message);
+        return saved?.channels || [];
+      } finally {
+        settledCount++;
+        if (!firstWaveResolved && settledCount >= DEFAULT_M3U_SOURCES.length) {
+          firstWaveResolved = true;
+          resolveFirstWave(aggregatedCache || []);
+        }
+      }
+    });
+
+    await Promise.allSettled(fetchPromises);
+    const finalGrouped = rebuildAggregatedCache(
+      now,
+      sourceChannelCache.size === DEFAULT_M3U_SOURCES.length
+    );
+    if (!firstWaveResolved) {
+      firstWaveResolved = true;
+      resolveFirstWave(finalGrouped);
+    }
+    console.log(
+      `[IPTV Aggregator] Fusión y agrupación completada: ${finalGrouped.length} canales únicos listos.`
+    );
+    return finalGrouped;
+  })();
+
+  refreshInFlight = task.finally(() => {
+    if (refreshInFlight === task) refreshInFlight = null;
+  });
+
+  // Si aún no hay caché en memoria/disco, resolver en cuanto llegue la primera oleada (<= 1.2s) sin esperar a las 9 listas
+  if (!forceRefresh) {
+    return Promise.race([
+      firstWavePromise,
+      new Promise((resolve) => setTimeout(() => resolve(aggregatedCache || []), 1800)),
+    ]).then((wave) => (wave && wave.length > 0 ? wave : task));
+  }
+  return refreshInFlight;
+}
+
+export async function prewarmChannels() {
+  await loadDiskCacheIfAvailable();
+  const now = Date.now();
+  if (!aggregatedCache || now - lastCacheTime >= CACHE_TTL) {
+    void refreshBaseChannelsInBackground(false);
+  }
+}
+
 export async function fetchXtreamChannels({ server, username, password }) {
   if (!server || !username || !password) return [];
 
   const cleanServer = server.replace(/\/+$/, '');
-  const apiUrl = `${cleanServer}/player_api.php?username=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&action=get_live_streams`;
+  const apiUrl = `${cleanServer}/player_api.php?username=${encodeURIComponent(
+    username
+  )}&password=${encodeURIComponent(password)}&action=get_live_streams`;
 
   try {
     const res = await axios.get(apiUrl, {
-      timeout: 8000,
+      timeout: 7000,
+      httpAgent,
+      httpsAgent,
       headers: {
         'User-Agent': 'IPTVSmarters/2.2.1 (Windows NT 10.0; Win64; x64)',
       },
@@ -368,7 +460,11 @@ export async function fetchXtreamChannels({ server, username, password }) {
       id: `xtream-${s.stream_id}`,
       name: s.name || `Canal ${s.stream_id}`,
       fullName: s.name || `Canal ${s.stream_id}`,
-      logo: s.stream_icon || `https://ui-avatars.com/api/?name=${encodeURIComponent(s.name || 'XC')}&background=002BE7&color=fff&bold=true`,
+      logo:
+        s.stream_icon ||
+        `https://ui-avatars.com/api/?name=${encodeURIComponent(
+          s.name || 'XC'
+        )}&background=002BE7&color=fff&bold=true`,
       category: s.category_name ? normalizeCategory(s.category_name, s.name) : 'Xtream Privado',
       rawCategory: s.category_name || 'Xtream',
       country: 'custom',
@@ -384,71 +480,20 @@ export async function fetchXtreamChannels({ server, username, password }) {
 }
 
 export async function getAggregatedChannels(options = {}) {
-  const {
-    forceRefresh = false,
-    customUrls = [],
-    xtream = null,
-  } = options;
+  const { forceRefresh = false, customUrls = [], xtream = null } = options;
 
+  await loadDiskCacheIfAvailable();
   const now = Date.now();
 
-  let baseChannels = [];
-  if (!forceRefresh && aggregatedCache && now - lastCacheTime < CACHE_TTL) {
+  let baseChannels;
+  if (!forceRefresh && aggregatedCache && aggregatedCache.length > 0) {
+    // Stale-While-Revalidate (SWR): devolver en 0ms y actualizar en segundo plano si expiró
     baseChannels = aggregatedCache;
+    if (now - lastCacheTime >= CACHE_TTL) {
+      void refreshBaseChannelsInBackground(false);
+    }
   } else {
-    console.log('[IPTV Aggregator] Descargando y fusionando fuentes M3U en paralelo...');
-
-    const fetchPromises = DEFAULT_M3U_SOURCES.map(async (src) => {
-      const saved = sourceChannelCache.get(src.url);
-      if (!forceRefresh && saved && now - saved.at < CACHE_TTL) return saved.channels;
-      try {
-        const res = await axios.get(src.url, {
-          timeout: 7500,
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-          },
-        });
-        const parsed = parseM3UContent(res.data, src);
-        if (!parsed.length) throw new Error('Lista sin canales');
-        sourceChannelCache.set(src.url, { channels: parsed, at: now });
-        return parsed;
-      } catch (err) {
-        console.warn(`[IPTV Aggregator] Fuente omitida (${src.name}):`, err.message);
-        return saved?.channels || [];
-      }
-    });
-
-    const results = await Promise.allSettled(fetchPromises);
-
-    const seenUrls = new Set();
-    const merged = [];
-
-    for (const res of results) {
-      if (res.status === 'fulfilled' && Array.isArray(res.value)) {
-        for (const channel of res.value) {
-          const normUrl = channel.url.toLowerCase().trim();
-          if (!seenUrls.has(normUrl)) {
-            seenUrls.add(normUrl);
-            merged.push(channel);
-          }
-        }
-      }
-    }
-
-    // Siempre garantizar señales base de respaldo y priorizar canales no-HEVC primero
-    for (const fb of FALLBACK_LIVE_CHANNELS) {
-      const normUrl = fb.url.toLowerCase().trim();
-      if (!seenUrls.has(normUrl)) {
-        seenUrls.add(normUrl);
-        merged.push({ ...fb });
-      }
-    }
-    merged.sort((a, b) => Number(Boolean(a.isHevcHint)) - Number(Boolean(b.isHevcHint)));
-
-    aggregatedCache = merged;
-    lastCacheTime = sourceChannelCache.size === DEFAULT_M3U_SOURCES.length ? now : now - CACHE_TTL + 60_000;
-    baseChannels = merged;
-    console.log(`[IPTV Aggregator] Fusión completada: ${baseChannels.length} canales únicos listos.`);
+    baseChannels = await refreshBaseChannelsInBackground(forceRefresh);
   }
 
   let customChannels = [];
@@ -457,7 +502,9 @@ export async function getAggregatedChannels(options = {}) {
     const customPromises = customUrls.filter(Boolean).map(async (url) => {
       try {
         const res = await axios.get(url, {
-          timeout: 8000,
+          timeout: 6500,
+          httpAgent,
+          httpsAgent,
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
           },
@@ -482,82 +529,149 @@ export async function getAggregatedChannels(options = {}) {
     customChannels.push(...xtreamList);
   }
 
-  let finalChannels = baseChannels;
-  if (customChannels.length > 0) {
-    const seen = new Set(customChannels.map((c) => c.url.toLowerCase().trim()));
-    const remainingBase = baseChannels.filter((c) => !seen.has(c.url.toLowerCase().trim()));
-    finalChannels = [...customChannels, ...remainingBase];
+  if (customChannels.length === 0) {
+    // baseChannels ya está agrupado y deduplicado en caché, retorno instantáneo
+    return baseChannels;
   }
 
-  return groupDuplicateChannels(finalChannels);
+  const seen = new Set(customChannels.map((c) => c.url.toLowerCase().trim()));
+  const remainingBase = baseChannels.filter((c) => !seen.has(c.url.toLowerCase().trim()));
+  return groupDuplicateChannels([...customChannels, ...remainingBase]);
 }
 
 /**
- * Proxy Inteligente de Streaming HLS/M3U8 y Segmentos TS/fMP4
- * Soluciona el bug de "Audio se reproduce pero pantalla negra" causado por:
- * 1. Sub-playlists de video sin extensión .m3u8 explícita que antes no se reescribían.
- * 2. Segmentos de inicialización #EXT-X-MAP:URI="..." y pistas separadas de video/audio.
- * 3. Cabeceras Origin/Referer requeridas por CDNs de Pluto TV, Akamai y Cloudfront.
+ * Proxy Inteligente de Streaming HLS/M3U8 y Segmentos TS/fMP4 con Keep-Alive y caché corta de manifiesto
  */
 export async function proxyStream(streamUrl, req, res) {
-  const controller = new AbortController(); let upstream;
-  const stop = () => { controller.abort(); upstream?.destroy(); };
-  res.once('close', stop); req.once('aborted', stop);
+  const controller = new AbortController();
+  let upstream;
+  const stop = () => {
+    controller.abort();
+    upstream?.destroy();
+  };
+  res.once('close', stop);
+  req.once('aborted', stop);
   try {
     const target = new URL(streamUrl);
-    if (!['http:', 'https:'].includes(target.protocol) || target.username || target.password) return res.status(400).json({ error: 'Se requiere una URL HTTP o HTTPS de medios' });
-    const response = await axios({ method: req.method === 'HEAD' ? 'head' : 'get', url: target.href, responseType: 'stream', timeout: 14000, maxRedirects: 5, signal: controller.signal,
-      validateStatus: status => status >= 200 && status < 300 || status === 416,
-      headers: { 'User-Agent': req.query.ua || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36', Referer: req.query.ref || target.origin + '/', Origin: target.origin, Accept: '*/*', 'Accept-Encoding': 'identity', ...(req.headers.range ? { Range: req.headers.range } : {}) },
+    if (!['http:', 'https:'].includes(target.protocol) || target.username || target.password) {
+      return res.status(400).json({ error: 'Se requiere una URL HTTP o HTTPS de medios' });
+    }
+
+    // Si es una petición GET sin rango a un manifiesto .m3u8 conocido en caché (< 1.8s), responder al instante
+    const cacheKey = `${target.href}|${req.query?.ref || ''}|${req.query?.ua || ''}`;
+    if (req.method === 'GET' && !req.headers.range) {
+      const cachedManifest = manifestProxyCache.get(cacheKey);
+      if (cachedManifest && Date.now() - cachedManifest.at < 1800) {
+        res.setHeader('Cache-Control', 'no-store');
+        return res.type('application/vnd.apple.mpegurl').send(cachedManifest.body);
+      }
+    }
+
+    const response = await axios({
+      method: req.method === 'HEAD' ? 'head' : 'get',
+      url: target.href,
+      responseType: 'stream',
+      timeout: 9000,
+      maxRedirects: 5,
+      httpAgent,
+      httpsAgent,
+      signal: controller.signal,
+      validateStatus: (status) => (status >= 200 && status < 300) || status === 416,
+      headers: {
+        'User-Agent': req.query.ua || 'StreamFlix/5.3',
+        Referer: req.query.ref || target.origin + '/',
+        Origin: target.origin,
+        Accept: '*/*',
+        'Accept-Encoding': 'identity',
+        ...(req.headers.range ? { Range: req.headers.range } : {}),
+      },
     });
     upstream = response.data;
     res.setHeader('Cache-Control', 'no-store');
     const contentType = response.headers['content-type'] || 'application/octet-stream';
     if (response.status === 416 || req.method === 'HEAD') {
-      for (const header of ['content-type', 'content-length', 'content-range', 'accept-ranges']) if (response.headers[header]) res.setHeader(header, response.headers[header]);
-      upstream.destroy(); return res.status(response.status).end();
+      for (const header of ['content-type', 'content-length', 'content-range', 'accept-ranges']) {
+        if (response.headers[header]) res.setHeader(header, response.headers[header]);
+      }
+      upstream.destroy();
+      return res.status(response.status).end();
     }
     const first = await new Promise((resolve, reject) => {
-      upstream.once('data', chunk => { upstream.pause(); resolve(chunk); });
-      upstream.once('end', () => resolve(Buffer.alloc(0))); upstream.once('error', reject);
+      upstream.once('data', (chunk) => {
+        upstream.pause();
+        resolve(chunk);
+      });
+      upstream.once('end', () => resolve(Buffer.alloc(0)));
+      upstream.once('error', reject);
     });
-    const isManifest = /mpegurl/i.test(contentType) || first.subarray(0, 64).toString('utf8').trimStart().startsWith('#EXTM3U');
+    const isManifest =
+      /mpegurl/i.test(contentType) ||
+      first.subarray(0, 64).toString('utf8').trimStart().startsWith('#EXTM3U');
     if (isManifest) {
-      let size = first.length; const chunks = [first];
-      for await (const chunk of upstream) { size += chunk.length; if (size > 2 * 1024 * 1024) throw new Error('Manifiesto demasiado grande'); chunks.push(chunk); }
+      let size = first.length;
+      const chunks = [first];
+      for await (const chunk of upstream) {
+        size += chunk.length;
+        if (size > 2 * 1024 * 1024) throw new Error('Manifiesto demasiado grande');
+        chunks.push(chunk);
+      }
       if (size > 2 * 1024 * 1024) throw new Error('Manifiesto demasiado grande');
       const finalUrl = response.request?.res?.responseUrl || target.href;
-      const proxied = value => {
-        try {
-          const resolved = new URL(value.trim(), finalUrl);
-          if (!['http:', 'https:'].includes(resolved.protocol)) return value;
-          const params = new URLSearchParams({ url: resolved.href });
-          if (req.query.ref) params.set('ref', req.query.ref);
-          if (req.query.ua) params.set('ua', req.query.ua);
-          return '/api/iptv/proxy?' + params;
-        } catch {
-          return value;
-        }
+      const proxied = (value) => {
+        const resolved = new URL(value.trim(), finalUrl);
+        if (!['http:', 'https:'].includes(resolved.protocol)) throw new Error('URI no admitida');
+        const params = new URLSearchParams({ url: resolved.href });
+        if (req.query.ref) params.set('ref', req.query.ref);
+        if (req.query.ua) params.set('ua', req.query.ua);
+        return '/api/iptv/proxy?' + params;
       };
-      const result = Buffer.concat(chunks).toString('utf8').split(/\r?\n/).map(line => !line.trim() ? line : line.startsWith('#') ? line.replace(/\bURI="([^"]+)"/g, (_, value) => 'URI="' + proxied(value) + '"') : proxied(line)).join('\n');
+      const result = Buffer.concat(chunks)
+        .toString('utf8')
+        .split(/\r?\n/)
+        .map((line) =>
+          !line.trim()
+            ? line
+            : line.startsWith('#')
+            ? line.replace(/\bURI="([^"]+)"/g, (_, value) => 'URI="' + proxied(value) + '"')
+            : proxied(line)
+        )
+        .join('\n');
+      if (manifestProxyCache.size >= 150) {
+        manifestProxyCache.delete(manifestProxyCache.keys().next().value);
+      }
+      manifestProxyCache.set(cacheKey, { body: result, at: Date.now() });
       return res.type('application/vnd.apple.mpegurl').send(result);
     }
-    if (/text\/html|application\/(json|xhtml)/i.test(contentType)) throw new Error('El servidor devolvió una página de error en lugar de video');
+    if (/text\/html|application\/(json|xhtml)/i.test(contentType)) {
+      throw new Error('El servidor devolvió una página de error en lugar de video');
+    }
     res.status(response.status).type(contentType);
-    for (const header of ['content-length', 'content-range', 'accept-ranges']) if (response.headers[header]) res.setHeader(header, response.headers[header]);
-    res.write(first); await pipeline(upstream, res);
+    for (const header of ['content-length', 'content-range', 'accept-ranges']) {
+      if (response.headers[header]) res.setHeader(header, response.headers[header]);
+    }
+    res.write(first);
+    await pipeline(upstream, res);
   } catch (error) {
     upstream?.destroy();
     if (res.destroyed || req.aborted) return;
-    if (!res.headersSent) res.status([403, 404, 410, 429, 416].includes(error.response?.status) ? error.response.status : 502).json({ error: 'La fuente no respondió o no entregó un archivo multimedia' });
-    else res.destroy();
-  } finally { res.off('close', stop); req.off('aborted', stop); }
+    if (!res.headersSent) {
+      res
+        .status([403, 404, 410, 429, 416].includes(error.response?.status) ? error.response.status : 502)
+        .json({ error: 'La fuente no respondió o no entregó un archivo multimedia' });
+    } else {
+      res.destroy();
+    }
+  } finally {
+    res.off('close', stop);
+    req.off('aborted', stop);
+  }
 }
 
 export const iptvService = {
   DEFAULT_M3U_SOURCES,
   COUNTRY_NAMES,
   getChannels: getAggregatedChannels,
+  prewarmChannels,
   fetchXtreamChannels,
   proxyStream,
 };
