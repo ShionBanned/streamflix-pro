@@ -35,6 +35,7 @@
     "appId": "com.shion.streamflix",
     "productName": "StreamFlix",
     "asar": false,
+    "npmRebuild": false,
     "directories": {
       "output": "dist-electron"
     },
