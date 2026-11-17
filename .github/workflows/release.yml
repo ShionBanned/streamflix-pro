@@ -31,6 +31,9 @@ jobs:
           node-version: 22
           cache: 'npm'
 
+      - name: Set up FFmpeg
+        uses: FedericoCarboni/setup-ffmpeg@v3
+
       - name: Validate Release Tag, Verify Git Ref & Checkout Tag Commit
         id: check_version
         shell: pwsh

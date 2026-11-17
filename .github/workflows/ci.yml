@@ -24,6 +24,9 @@ jobs:
           node-version: 22
           cache: 'npm'
 
+      - name: Set up FFmpeg
+        uses: FedericoCarboni/setup-ffmpeg@v3
+
       - name: Install Root Dependencies
         run: npm install
 
