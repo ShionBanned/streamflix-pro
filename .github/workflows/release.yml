@@ -67,7 +67,7 @@ jobs:
           $frontendVersion = (Get-Content frontend/package.json | ConvertFrom-Json).version
           
           if ($pkgVersion -ne $backendVersion -or $pkgVersion -ne $frontendVersion) {
-            Write-Error "Inconsistencia de versiones en el commit de $gitTag: root ($pkgVersion), backend ($backendVersion), frontend ($frontendVersion)"
+            Write-Error "Inconsistencia de versiones en el commit de ${gitTag} - root ($pkgVersion), backend ($backendVersion), frontend ($frontendVersion)"
             exit 1
           }
 
