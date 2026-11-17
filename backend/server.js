@@ -605,4 +605,7 @@ app.listen(PORT, '127.0.0.1', () => {
   console.log(`🚀 StreamFlix Pro v5.3 activo en: http://localhost:${PORT}`);
   console.log(`🎬 Diagnóstico Cloud, reproducción directa y conversión de audio disponibles`);
   console.log(`=======================================================`);
+  setTimeout(() => {
+    iptvService.getChannels().catch(() => {});
+  }, 300);
 });

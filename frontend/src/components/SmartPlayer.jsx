@@ -35,7 +35,7 @@ import {
 } from 'lucide-react';
 import { LANGUAGE_OPTIONS, AUDIO_ENGINE_PRESETS } from '../hooks/useUserMedia.js';
 
-const DirectPlayer = React.lazy(() => import('./DirectPlayer.jsx'));
+import DirectPlayer from './DirectPlayer.jsx';
 const SITE_SOURCES = [
   { id: 'cuevana', name: 'Cuevana', example: 'https://cuevana3w.pro/pelicula/... o /serie/.../episodio-1x1' },
   { id: 'animeav1', name: 'AnimeAV1', example: 'https://animeav1.com/media/.../1' },
@@ -1491,7 +1491,7 @@ export default function SmartPlayer({
           <div className="flex items-center gap-2.5 bg-black/55 hover:bg-black/75 backdrop-blur-xl border border-white/10 pl-1.5 pr-4 py-1 rounded-full shadow-xl transition-all">
             <button
               onClick={handleSafeClose}
-              className="w-8 h-8 rounded-full bg-white/10 hover:bg-[#E50914] text-white flex items-center justify-center transition-all hover:scale-105"
+              className="nf-icon-btn w-8 h-8 rounded-full bg-white/10 hover:bg-[#E50914] text-white flex items-center justify-center"
               title="Guardar progreso y volver (ESC)"
             >
               <ArrowLeft className="w-4 h-4" />
@@ -1541,7 +1541,7 @@ export default function SmartPlayer({
                     });
                   }
                 }}
-                className="hidden sm:flex items-center gap-1.5 bg-black/80 hover:bg-white hover:text-black text-white backdrop-blur-xl border border-white/15 px-3 py-2 rounded-full text-xs font-bold transition-all shadow-lg"
+                className="nf-pill hidden sm:flex items-center gap-1.5 bg-black/80 hover:bg-white hover:text-black text-white backdrop-blur-xl border border-white/15 px-3 py-2 rounded-full text-xs font-bold shadow-lg"
               >
                 <SkipForward className="w-3.5 h-3.5 fill-current" />
                 <span>Sig. Ep</span>
@@ -1559,7 +1559,7 @@ export default function SmartPlayer({
               >
                 <Tv className="w-3.5 h-3.5 text-sky-400" />
                 <span className="hidden md:inline">Episodios</span>
-                <ChevronDown className="w-3.5 h-3.5 opacity-75" />
+                <ChevronDown className={`w-3.5 h-3.5 opacity-75 transition-transform duration-300 ease-nf-out ${activeDrawer === 'episodes' ? 'rotate-180' : ''}`} />
               </button>
             </>
           )}
@@ -1576,7 +1576,7 @@ export default function SmartPlayer({
             <Headphones className="w-3.5 h-3.5 text-neutral-200" />
             <span>{currentLangObj.flag}</span>
             <span className="hidden sm:inline">Audio e idioma</span>
-            <ChevronDown className="w-3.5 h-3.5 opacity-75" />
+            <ChevronDown className={`w-3.5 h-3.5 opacity-75 transition-transform duration-300 ease-nf-out ${activeDrawer === 'audio' ? 'rotate-180' : ''}`} />
           </button>
 
           <button
@@ -1591,7 +1591,7 @@ export default function SmartPlayer({
           >
             <Layers className="w-3.5 h-3.5 text-neutral-200" />
             <span className="max-w-[115px] sm:max-w-[175px] truncate">{activeServerLabel}</span>
-            <ChevronDown className="w-3.5 h-3.5 opacity-75" />
+            <ChevronDown className={`w-3.5 h-3.5 opacity-75 transition-transform duration-300 ease-nf-out ${activeDrawer === 'servers' ? 'rotate-180' : ''}`} />
           </button>
         </div>
       </div>
@@ -1599,7 +1599,7 @@ export default function SmartPlayer({
       {/* CAJÓN A: Audio e Idioma (Diseño intuitivo con 2 pestañas) */}
       <div
         onClick={(e) => e.stopPropagation()}
-        className={`absolute top-16 right-4 sm:right-24 z-50 w-[355px] sm:w-[400px] max-w-[94vw] max-h-[80vh] overflow-hidden flex flex-col bg-[#141414]/98 backdrop-blur-2xl border border-white/15 rounded-2xl shadow-[0_25px_70px_rgba(0,0,0,0.95)] ${activeDrawer === 'audio' ? 'animate-panelEnter' : 'hidden'}`}
+        className={`absolute top-16 right-4 sm:right-24 z-50 w-[355px] sm:w-[400px] max-w-[94vw] max-h-[80vh] overflow-hidden flex flex-col bg-[#141414]/98 backdrop-blur-2xl border border-white/15 rounded-2xl shadow-[0_25px_70px_rgba(0,0,0,0.95)] ${activeDrawer === 'audio' ? 'animate-nfDropdown' : 'hidden'}`}
       >
         <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
           <h3 className="text-sm font-bold text-white flex items-center gap-2">
@@ -1634,7 +1634,7 @@ export default function SmartPlayer({
 
         <div className="p-4 overflow-y-auto space-y-4">
           {audioMenuTab === 'lang' ? (
-            <>
+            <div className="space-y-4 animate-nfTabContent">
               <div className="space-y-2">
                 <span className="text-xs font-bold text-neutral-300 block">Idioma preferido</span>
                 <p className="text-[11px] text-neutral-400">Esta preferencia prioriza fuentes e idiomas disponibles; no crea un doblaje nuevo.</p>
@@ -1801,9 +1801,9 @@ export default function SmartPlayer({
                   </div>
                 </div>
               )}
-            </>
+            </div>
           ) : audioMenuTab === 'dsp' ? (
-            <>
+            <div className="space-y-4 animate-nfTabContent">
               <fieldset disabled={activeServer !== 'p2p'} className="space-y-4 disabled:opacity-45">
                 {activeServer !== 'p2p' && (
                   <p className="text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/25 rounded-lg px-3 py-2">
@@ -1867,7 +1867,7 @@ export default function SmartPlayer({
                 </div>
               </fieldset>
 
-            </>
+            </div>
           ) : null}
           <div className={audioMenuTab === 'external' ? 'space-y-3' : 'hidden'}>
             {activeServer === 'p2p' && selectedP2PStream ? (
@@ -1899,7 +1899,7 @@ export default function SmartPlayer({
       {activeDrawer === 'servers' && (
         <div
           onClick={(e) => e.stopPropagation()}
-          className="absolute top-16 right-4 z-50 w-[370px] sm:w-[435px] max-w-[94vw] max-h-[80vh] overflow-hidden flex flex-col bg-[#141414]/98 backdrop-blur-2xl border border-white/15 rounded-2xl shadow-[0_25px_70px_rgba(0,0,0,0.95)] animate-panelEnter"
+          className="absolute top-16 right-4 z-50 w-[370px] sm:w-[435px] max-w-[94vw] max-h-[80vh] overflow-hidden flex flex-col bg-[#141414]/98 backdrop-blur-2xl border border-white/15 rounded-2xl shadow-[0_25px_70px_rgba(0,0,0,0.95)] animate-nfDropdown"
         >
           <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
             <div>
@@ -1939,7 +1939,7 @@ export default function SmartPlayer({
 
           <div className="p-4 overflow-y-auto space-y-3.5">
             {serverMenuTab === 'cloud' && (
-              <>
+              <div className="space-y-3.5 animate-nfTabContent">
                 <div className="flex items-center gap-2">
                   <button
                     onClick={tryNextCloud}
@@ -2013,11 +2013,11 @@ export default function SmartPlayer({
                       </div>
                     </div>
                   )}
-              </>
+              </div>
             )}
 
             {serverMenuTab === 'p2p' && (
-              <div className="space-y-3">
+              <div className="space-y-3 animate-nfTabContent">
                 <div className="flex items-center justify-between gap-2">
                   <button
                     onClick={() => setForceTranscode(!forceTranscode)}
@@ -2130,7 +2130,7 @@ export default function SmartPlayer({
             )}
 
             {serverMenuTab === 'sites' && (
-              <div className="space-y-3">
+              <div className="space-y-3 animate-nfTabContent">
                 {SITE_SOURCES.map((source) => {
                   const servers = siteServers[source.id] || [];
                   const languages = [...new Set(servers.map((server) => server.languageCode).filter((code) => code && code !== 'unknown'))];
@@ -2149,7 +2149,7 @@ export default function SmartPlayer({
                         <ChevronDown className={`w-4 h-4 text-neutral-400 transition-transform ${expanded ? 'rotate-180' : ''}`} />
                       </button>
                       {expanded && (
-                        <div className="px-3 pb-3 space-y-2">
+                        <div className="px-3 pb-3 space-y-2 animate-nfAccordion">
                           <div className="flex gap-1.5">
                             <input
                               type="search"
@@ -2253,7 +2253,7 @@ export default function SmartPlayer({
       {activeDrawer === 'episodes' && isSeries && (
         <div
           onClick={(e) => e.stopPropagation()}
-          className="absolute top-16 right-4 sm:right-16 z-50 w-[350px] sm:w-[420px] max-w-[94vw] max-h-[80vh] flex flex-col bg-[#121212]/98 backdrop-blur-3xl border border-white/15 ring-1 ring-[#E50914]/30 rounded-2xl shadow-[0_25px_70px_rgba(0,0,0,0.95)] p-4 animate-panelEnter"
+          className="absolute top-16 right-4 sm:right-16 z-50 w-[350px] sm:w-[420px] max-w-[94vw] max-h-[80vh] flex flex-col bg-[#121212]/98 backdrop-blur-3xl border border-white/15 ring-1 ring-[#E50914]/30 rounded-2xl shadow-[0_25px_70px_rgba(0,0,0,0.95)] p-4 animate-nfDropdown"
         >
           <div className="flex items-center justify-between pb-3 border-b border-white/10">
             <div className="flex items-center gap-2">
@@ -2523,7 +2523,7 @@ export default function SmartPlayer({
                   <button
                     onClick={togglePlay}
                     aria-label={isPlaying ? 'Pausar' : 'Reproducir'}
-                    className="p-1.5 text-white hover:text-[#E50914] transition"
+                    className="nf-icon-btn p-1.5 rounded-full text-white hover:text-[#E50914] hover:bg-white/10"
                   >
                     {isPlaying ? (
                       <Pause className="w-5 h-5 fill-current" />
@@ -2556,7 +2556,7 @@ export default function SmartPlayer({
                     onClick={() =>
                       setActiveDrawer(activeDrawer === 'audio' ? null : 'audio')
                     }
-                    className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-[#E50914]/20 border border-[#E50914]/50 text-xs font-extrabold text-red-200"
+                    className="nf-pill flex items-center gap-1 px-2.5 py-1 rounded-full bg-[#E50914]/20 border border-[#E50914]/50 text-xs font-extrabold text-red-200"
                   >
                     <Headphones className="w-3.5 h-3.5 text-[#E50914]" />
                     <span>DSP {audioGainPercent}%</span>
@@ -2567,7 +2567,7 @@ export default function SmartPlayer({
                       onClick={() =>
                         setActiveDrawer(activeDrawer === 'subtitles' ? null : 'subtitles')
                       }
-                      className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-white/10 hover:bg-white/15 text-xs font-bold text-white"
+                      className="nf-pill flex items-center gap-1 px-2.5 py-1 rounded-full bg-white/10 hover:bg-white/15 text-xs font-bold text-white"
                     >
                       <Subtitles className="w-3.5 h-3.5 text-amber-400" />
                       <span>Subtítulos ({subtitles.length})</span>
@@ -2583,7 +2583,7 @@ export default function SmartPlayer({
                       return (
                       <div
                         onClick={(e) => e.stopPropagation()}
-                        className="absolute bottom-10 left-0 bg-[#141414]/98 backdrop-blur-xl border border-white/15 rounded-xl shadow-2xl w-80 max-w-[90vw] z-50 overflow-hidden"
+                        className="absolute bottom-10 left-0 bg-[#141414]/98 backdrop-blur-xl border border-white/15 rounded-xl shadow-2xl w-80 max-w-[90vw] z-50 overflow-hidden animate-nfPopoverUp"
                       >
                         <div className="grid grid-cols-3 border-b border-white/10 bg-white/[0.03] text-[11px] font-bold">
                           {[
@@ -2605,7 +2605,7 @@ export default function SmartPlayer({
                           ))}
                         </div>
 
-                        <div className="p-3 max-h-[58vh] overflow-y-auto space-y-2.5">
+                        <div key={subMenuTab} className="p-3 max-h-[58vh] overflow-y-auto space-y-2.5 animate-nfTabContent">
                           {subMenuTab === 'tracks' && (
                             <>
                               <button

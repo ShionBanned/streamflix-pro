@@ -491,7 +491,7 @@ export const api = {
       params.password = xtream.password;
     }
 
-    const res = await apiClient.get('/iptv/channels', { params });
+    const res = await apiClient.get('/iptv/channels', { params, timeout: 30000 });
     return res.data;
   },
 

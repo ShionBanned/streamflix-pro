@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { ChevronDown, Check, Sparkles, Search, X } from 'lucide-react';
+import { ChevronDown, Check, Search, X } from 'lucide-react';
 
 /**
- * CustomSelect — Selector desplegable futurista con estética Glassmorphic para StreamFlix Pro v5.0
- * Reemplaza el 100% de las etiquetas nativas <select> y <option> del sistema operativo.
+ * CustomSelect — Selector desplegable con estética y movimiento estilo Netflix
  */
 export default function CustomSelect({
   options = [],
@@ -130,7 +129,7 @@ export default function CustomSelect({
   const variantClasses = {
     default: isOpen
       ? 'bg-[#161616]/95 border-[#E50914] text-white shadow-[0_0_20px_rgba(229,9,20,0.28)]'
-      : 'bg-[#141414]/90 hover:bg-[#1d1d1d] border-white/15 hover:border-white/30 text-white shadow-lg',
+      : 'bg-[#141414]/90 hover:bg-[#1d1d1d] border-white/15 hover:border-white/35 text-white shadow-lg',
     red: isOpen
       ? 'bg-[#E50914] border-red-300 text-white shadow-[0_0_24px_rgba(229,9,20,0.5)]'
       : 'bg-[#E50914]/20 hover:bg-[#E50914]/30 border-[#E50914]/50 text-white',
@@ -150,7 +149,7 @@ export default function CustomSelect({
         onKeyDown={handleKeyDown}
         aria-haspopup="listbox"
         aria-expanded={isOpen}
-        className={`w-full flex items-center justify-between font-bold border backdrop-blur-2xl transition-all duration-200 focus:outline-none ${
+        className={`nf-btn w-full flex items-center justify-between font-bold border backdrop-blur-2xl focus:outline-none ${
           sizeClasses[size] || sizeClasses.md
         } ${variantClasses[variant] || variantClasses.default}`}
       >
@@ -175,7 +174,7 @@ export default function CustomSelect({
         </div>
 
         <ChevronDown
-          className={`w-3.5 h-3.5 text-neutral-400 shrink-0 transition-transform duration-300 ${
+          className={`w-3.5 h-3.5 text-neutral-400 shrink-0 transition-transform duration-300 ease-nf-out ${
             isOpen ? 'rotate-180 text-[#E50914]' : ''
           }`}
         />
@@ -183,8 +182,8 @@ export default function CustomSelect({
 
       {isOpen && (
         <div
-          className={`absolute z-[70] mt-2 min-w-[230px] w-max max-w-[90vw] bg-[#101010] border border-white/20 ring-1 ring-[#E50914]/30 rounded-2xl shadow-[0_24px_65px_rgba(0,0,0,0.95)] p-1.5 animate-fadeIn ${
-            align === 'right' ? 'right-0' : 'left-0'
+          className={`absolute z-[70] mt-2 min-w-[230px] w-max max-w-[90vw] bg-[#101010]/98 backdrop-blur-2xl border border-white/20 ring-1 ring-[#E50914]/30 rounded-2xl shadow-[0_24px_65px_rgba(0,0,0,0.95)] p-1.5 ${
+            align === 'right' ? 'right-0 animate-nfDropdown' : 'left-0 animate-nfDropdownLeft'
           } ${menuClassName}`}
         >
           {(searchable || normalizedOptions.length > 8) && (
@@ -197,13 +196,13 @@ export default function CustomSelect({
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   placeholder="Filtrar opción..."
-                  className="w-full bg-black/70 border border-white/15 focus:border-[#E50914] rounded-xl pl-8 pr-7 py-1.5 text-xs text-white placeholder-neutral-500 focus:outline-none"
+                  className="w-full bg-black/70 border border-white/15 focus:border-[#E50914] rounded-xl pl-8 pr-7 py-1.5 text-xs text-white placeholder-neutral-500 focus:outline-none transition-colors"
                 />
                 {searchTerm && (
                   <button
                     type="button"
                     onClick={() => setSearchTerm('')}
-                    className="absolute right-2 text-neutral-400 hover:text-white"
+                    className="nf-icon-btn absolute right-2 text-neutral-400 hover:text-white"
                   >
                     <X className="w-3 h-3" />
                   </button>
@@ -217,7 +216,7 @@ export default function CustomSelect({
             className="max-h-64 overflow-y-auto space-y-1 pr-0.5"
           >
             {filteredOptions.length === 0 ? (
-              <div className="px-3 py-4 text-center text-xs text-neutral-500">
+              <div className="px-3 py-4 text-center text-xs text-neutral-500 animate-fadeIn">
                 Sin coincidencias
               </div>
             ) : (
@@ -233,12 +232,12 @@ export default function CustomSelect({
                     aria-selected={isSelected}
                     onMouseEnter={() => setHighlightedIdx(idx)}
                     onClick={() => handleSelect(opt.value)}
-                    className={`w-full text-left px-3 py-2 rounded-xl transition-all duration-150 flex items-center justify-between gap-3 ${
+                    className={`w-full text-left px-3 py-2 rounded-xl transition-all duration-200 ease-nf-out flex items-center justify-between gap-3 ${
                       isSelected
                         ? 'bg-gradient-to-r from-[#E50914]/30 via-[#E50914]/15 to-transparent border border-[#E50914]/60 text-white shadow-[0_0_15px_rgba(229,9,20,0.2)]'
                         : isHighlighted
-                        ? 'bg-white/[0.08] text-white border border-transparent'
-                        : 'text-neutral-300 hover:bg-white/[0.05] hover:text-white border border-transparent'
+                        ? 'bg-white/[0.08] text-white border border-transparent translate-x-0.5'
+                        : 'text-neutral-300 hover:bg-white/[0.06] hover:text-white hover:translate-x-0.5 border border-transparent'
                     }`}
                   >
                     <div className="flex items-start gap-2.5 min-w-0">
@@ -277,7 +276,7 @@ export default function CustomSelect({
                     </div>
 
                     {isSelected && (
-                      <span className="w-5 h-5 rounded-full bg-[#E50914] text-white flex items-center justify-center shrink-0 shadow-[0_0_10px_#E50914]">
+                      <span className="w-5 h-5 rounded-full bg-[#E50914] text-white flex items-center justify-center shrink-0 shadow-[0_0_10px_#E50914] animate-nfCheckPop">
                         <Check className="w-3 h-3 stroke-[3]" />
                       </span>
                     )}

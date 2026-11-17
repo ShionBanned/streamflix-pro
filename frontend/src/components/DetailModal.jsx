@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import api from '../services/api.js';
 import CustomSelect from './CustomSelect.jsx';
 import {
@@ -56,7 +56,54 @@ export default function DetailModal({
   const [userReaction, setUserReaction] = useState(null); // 'dislike' | 'like' | 'love' | null
   const [rateMenuOpen, setRateMenuOpen] = useState(false);
   const [rateAnim, setRateAnim] = useState(null);
+  const [isClosing, setIsClosing] = useState(false);
   const [downloadOpen, setDownloadOpen] = useState(false);
+  const [downloadClosing, setDownloadClosing] = useState(false);
+  const closeTimerRef = useRef(null);
+  const downloadCloseTimerRef = useRef(null);
+
+  const closeDownloadModal = useCallback(() => {
+    if (downloadClosing) return;
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+      setDownloadOpen(false);
+      return;
+    }
+    setDownloadClosing(true);
+    if (downloadCloseTimerRef.current) clearTimeout(downloadCloseTimerRef.current);
+    downloadCloseTimerRef.current = setTimeout(() => {
+      setDownloadOpen(false);
+      setDownloadClosing(false);
+    }, 280);
+  }, [downloadClosing]);
+
+  const handleRequestClose = useCallback(() => {
+    if (isClosing) return;
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+      onClose?.();
+      return;
+    }
+    const frame = trailerFrameRef.current;
+    if (frame?.contentWindow) {
+      try {
+        frame.contentWindow.postMessage(
+          JSON.stringify({ event: 'command', func: 'mute', args: [] }),
+          '*'
+        );
+      } catch {}
+    }
+    setIsClosing(true);
+    if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+    closeTimerRef.current = setTimeout(() => {
+      onClose?.();
+    }, 290);
+  }, [isClosing, onClose]);
+
+  useEffect(() => {
+    return () => {
+      if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+      if (downloadCloseTimerRef.current) clearTimeout(downloadCloseTimerRef.current);
+    };
+  }, []);
   const [downloadSources, setDownloadSources] = useState([]);
   const [downloadLoading, setDownloadLoading] = useState(false);
   const [downloadBusy, setDownloadBusy] = useState(false);
@@ -124,6 +171,7 @@ export default function DetailModal({
   useEffect(() => {
     if (!item?.id) return;
     let isMounted = true;
+    setIsClosing(false);
     setDetails(null);
     setCollection(null);
     setTrailerKey(null);
@@ -183,14 +231,17 @@ export default function DetailModal({
     };
   }, [isTv, item?.id, selectedSeason, currentLangObj.tmdbLang]);
 
-  // Escape para cerrar
+  // Escape para cerrar con animación inversa
   useEffect(() => {
     const onKeyDown = (e) => {
-      if (e.key === 'Escape') onClose?.();
+      if (e.key === 'Escape') {
+        if (downloadOpen) closeDownloadModal();
+        else handleRequestClose();
+      }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [onClose]);
+  }, [downloadOpen, closeDownloadModal, handleRequestClose]);
 
   const toggleTrailerMute = () => {
     const nextMuted = !isTrailerMuted;
@@ -240,8 +291,6 @@ export default function DetailModal({
 
   const cast = details?.credits?.cast?.slice(0, 10) || [];
   const genres = details?.genres || [];
-
-
 
   const visibleSimilar = showAllSimilar ? similarItems : similarItems.slice(0, 9);
 
@@ -299,13 +348,17 @@ export default function DetailModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-start justify-center overflow-y-auto p-2 sm:p-6 animate-fadeIn"
-      onClick={onClose}
+      className={`fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-start justify-center overflow-y-auto p-2 sm:p-6 ${
+        isClosing ? 'animate-nfBackdropOut pointer-events-none' : 'animate-nfBackdrop'
+      }`}
+      onClick={handleRequestClose}
     >
       <div
         ref={modalBodyRef}
         onClick={(e) => e.stopPropagation()}
-        className="relative w-full max-w-[920px] my-4 sm:my-8 bg-[#181818] rounded-xl overflow-hidden shadow-[0_30px_90px_rgba(0,0,0,0.95)] border border-white/10 text-white animate-modalSlideUp"
+        className={`relative w-full max-w-[920px] my-4 sm:my-8 bg-[#181818] rounded-xl overflow-hidden shadow-[0_30px_90px_rgba(0,0,0,0.95)] border border-white/10 text-white ${
+          isClosing ? 'animate-modalSlideDown' : 'animate-modalSlideUp'
+        }`}
       >
         {/* 1. HERO CON TRÁILER AUTOMÁTICO EN SILENCIO */}
         <div className="relative w-full aspect-video max-h-[520px] bg-black overflow-hidden">
@@ -313,7 +366,7 @@ export default function DetailModal({
             <img
               src={backdropUrl}
               alt={title}
-              className="w-full h-full object-cover"
+              className="w-full h-full object-cover animate-heroBackdrop"
             />
           )}
 
@@ -325,19 +378,19 @@ export default function DetailModal({
               title={`Tráiler de ${title}`}
               tabIndex={-1}
               aria-hidden="true"
-              className="absolute inset-0 w-full h-full scale-[1.28] pointer-events-none select-none border-0"
+              className="absolute inset-0 w-full h-full scale-[1.28] pointer-events-none select-none border-0 animate-fadeIn"
               allow="autoplay; encrypted-media"
             />
           )}
 
           <div className="absolute inset-0 z-10 bg-gradient-to-t from-[#181818] via-[#181818]/25 to-black/35" />
 
-          {/* Botón Cerrar */}
+          {/* Botón Cerrar con rotación elástica */}
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleRequestClose}
             aria-label="Cerrar vista previa"
-            className="absolute top-4 right-4 z-20 w-9 h-9 rounded-full bg-[#181818]/90 hover:bg-[#2a2a2a] text-white flex items-center justify-center border border-white/15 transition"
+            className="nf-icon-btn absolute top-4 right-4 z-20 w-9 h-9 rounded-full bg-[#181818]/90 hover:bg-[#E50914] text-white flex items-center justify-center border border-white/15 hover:rotate-90"
           >
             <X className="w-5 h-5" />
           </button>
@@ -345,11 +398,11 @@ export default function DetailModal({
           {/* Título + Botones de Acción (Reproducir / + o ✓ / Calificación / Mute) */}
           <div className="absolute bottom-6 left-6 right-6 z-20 flex items-end justify-between gap-4">
             <div className="space-y-4 max-w-xl">
-              <h1 className="text-2xl sm:text-4xl font-black text-white tracking-tight drop-shadow-[0_4px_16px_rgba(0,0,0,0.9)] leading-tight">
+              <h1 className="text-2xl sm:text-4xl font-black text-white tracking-tight drop-shadow-[0_4px_16px_rgba(0,0,0,0.9)] leading-tight animate-heroStagger-2">
                 {title}
               </h1>
 
-              <div className="flex flex-wrap items-center gap-2.5">
+              <div className="flex flex-wrap items-center gap-2.5 animate-heroStagger-3">
                 <button
                   type="button"
                   onClick={() =>
@@ -361,7 +414,7 @@ export default function DetailModal({
                       preferredLanguage
                     )
                   }
-                  className="flex items-center gap-2 px-6 py-2.5 bg-white hover:bg-neutral-200 text-black font-bold text-sm sm:text-base rounded-[4px] shadow-lg transition active:scale-95"
+                  className="hero-primary-cta flex items-center gap-2 px-6 py-2.5 bg-white hover:bg-neutral-200 text-black font-bold text-sm sm:text-base rounded-[4px] shadow-lg"
                 >
                   <Play className="w-5 h-5 fill-current" />
                   <span>
@@ -385,7 +438,7 @@ export default function DetailModal({
                         preferredLanguage
                       )
                     }
-                    className="flex items-center gap-1.5 px-3.5 py-2.5 bg-neutral-800/90 hover:bg-neutral-700 text-white font-semibold text-xs sm:text-sm rounded-[4px] border border-white/20 transition"
+                    className="nf-btn flex items-center gap-1.5 px-3.5 py-2.5 bg-neutral-800/90 hover:bg-neutral-700 text-white font-semibold text-xs sm:text-sm rounded-[4px] border border-white/20"
                     title="Reproducir desde el inicio"
                   >
                     <RotateCcw className="w-4 h-4" />
@@ -396,7 +449,7 @@ export default function DetailModal({
                 <button
                   type="button"
                   onClick={() => { setDownloadOpen(true); setDownloadEpisode(savedEntry?.episode || 1); setDownloadSuccess(''); setDownloadUrl(''); void loadDownloadSources(savedEntry?.episode || 1); }}
-                  className="flex items-center gap-1.5 px-3.5 py-2.5 bg-neutral-800/90 hover:bg-neutral-700 text-white font-semibold text-xs sm:text-sm rounded-[4px] border border-white/20 transition"
+                  className="nf-btn flex items-center gap-1.5 px-3.5 py-2.5 bg-neutral-800/90 hover:bg-neutral-700 text-white font-semibold text-xs sm:text-sm rounded-[4px] border border-white/20"
                   title="Guardar para ver sin conexión"
                 >
                   <Download className="w-4 h-4" />
@@ -408,9 +461,9 @@ export default function DetailModal({
                     type="button"
                     onClick={() => onToggleWatchlist(item)}
                     title={inWatchlist ? 'Quitar de Mi lista' : 'Agregar a Mi lista'}
-                    className="w-10 h-10 rounded-full border-2 border-white/50 hover:border-white bg-[#2a2a2a]/70 text-white flex items-center justify-center transition"
+                    className="nf-icon-btn w-10 h-10 rounded-full border-2 border-white/50 hover:border-white bg-[#2a2a2a]/70 text-white flex items-center justify-center"
                   >
-                    {inWatchlist ? <Check className="w-5 h-5" /> : <Plus className="w-5 h-5" />}
+                    {inWatchlist ? <Check className="w-5 h-5 animate-nfCheckPop" /> : <Plus className="w-5 h-5" />}
                   </button>
                 )}
 
@@ -427,7 +480,7 @@ export default function DetailModal({
                     type="button"
                     onClick={() => setRateMenuOpen((v) => !v)}
                     title="Calificar título"
-                    className={`relative w-10 h-10 rounded-full border-2 flex items-center justify-center transition ${
+                    className={`nf-icon-btn relative w-10 h-10 rounded-full border-2 flex items-center justify-center ${
                       userReaction
                         ? 'border-white bg-white/15 text-white'
                         : 'border-white/50 hover:border-white bg-[#2a2a2a]/70 text-white'
@@ -473,7 +526,7 @@ export default function DetailModal({
                         onClick={() => handleSetReaction('dislike')}
                         title="No es para mí"
                         style={{ animationDelay: '0.02s' }}
-                        className={`w-9 h-9 rounded-full flex items-center justify-center transition hover:bg-white/15 animate-capsule-icon ${
+                        className={`nf-icon-btn w-9 h-9 rounded-full flex items-center justify-center hover:bg-white/15 animate-capsule-icon ${
                           userReaction === 'dislike' ? 'text-white' : 'text-neutral-200'
                         }`}
                       >
@@ -489,7 +542,7 @@ export default function DetailModal({
                         onClick={() => handleSetReaction('like')}
                         title="Me gusta"
                         style={{ animationDelay: '0.05s' }}
-                        className={`relative w-9 h-9 rounded-full flex items-center justify-center transition hover:bg-white/15 animate-capsule-icon ${
+                        className={`nf-icon-btn relative w-9 h-9 rounded-full flex items-center justify-center hover:bg-white/15 animate-capsule-icon ${
                           userReaction === 'like' ? 'text-white' : 'text-neutral-200'
                         }`}
                       >
@@ -508,7 +561,7 @@ export default function DetailModal({
                         onClick={() => handleSetReaction('love')}
                         title="¡Me encanta!"
                         style={{ animationDelay: '0.08s' }}
-                        className={`relative w-9 h-9 rounded-full flex items-center justify-center transition hover:bg-white/15 animate-capsule-icon ${
+                        className={`nf-icon-btn relative w-9 h-9 rounded-full flex items-center justify-center hover:bg-white/15 animate-capsule-icon ${
                           userReaction === 'love' ? 'text-white' : 'text-neutral-200'
                         }`}
                       >
@@ -549,9 +602,9 @@ export default function DetailModal({
                 onClick={toggleTrailerMute}
                 aria-label={isTrailerMuted ? 'Activar sonido del tráiler' : 'Silenciar tráiler'}
                 title={isTrailerMuted ? 'Activar sonido' : 'Silenciar'}
-                className="w-10 h-10 rounded-full border border-white/40 hover:border-white bg-[#181818]/75 text-white flex items-center justify-center transition shrink-0"
+                className="nf-icon-btn w-10 h-10 rounded-full border border-white/40 hover:border-white bg-[#181818]/75 text-white flex items-center justify-center shrink-0"
               >
-                {isTrailerMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+                {isTrailerMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4 animate-capsule-icon" />}
               </button>
             )}
           </div>
@@ -604,7 +657,7 @@ export default function DetailModal({
                     <button
                       type="button"
                       onClick={() => aboutSectionRef.current?.scrollIntoView({ behavior: 'smooth' })}
-                      className="italic text-neutral-300 hover:underline ml-1"
+                      className="italic text-neutral-300 hover:text-white hover:underline ml-1 transition-colors"
                     >
                       , más
                     </button>
@@ -670,11 +723,11 @@ export default function DetailModal({
               {loadingEpisodes ? (
                 <div className="space-y-3">
                   {[1, 2, 3].map((n) => (
-                    <div key={n} className="h-24 rounded bg-white/5 animate-pulse" />
+                    <div key={n} className="h-24 rounded bg-white/5 netflix-shimmer" />
                   ))}
                 </div>
               ) : (
-                <div className="divide-y divide-white/10">
+                <div key={`ep-list-${selectedSeason}`} className="divide-y divide-white/10 animate-nfTabContent">
                   {episodes.map((ep, idx) => {
                     const stillImg = ep.still_path
                       ? `https://image.tmdb.org/t/p/w300${ep.still_path}`
@@ -692,31 +745,31 @@ export default function DetailModal({
                             preferredLanguage
                           )
                         }
-                        className={`episode-row w-full text-left flex items-center gap-4 sm:gap-5 px-4 sm:px-7 py-5 sm:py-6 rounded transition group ${
+                        className={`episode-row w-full text-left flex items-center gap-4 sm:gap-5 px-4 sm:px-7 py-5 sm:py-6 rounded group ${
                           idx === 0 ? 'bg-[#333333]/80 hover:bg-[#3a3a3a]' : 'hover:bg-white/[0.06]'
                         }`}
                       >
-                        <span className="text-xl sm:text-2xl font-normal text-neutral-300 w-7 text-center shrink-0">
+                        <span className="text-xl sm:text-2xl font-normal text-neutral-300 group-hover:text-white transition-colors w-7 text-center shrink-0">
                           {ep.episode_number}
                         </span>
-                        <div className="relative w-32 sm:w-40 aspect-video rounded overflow-hidden bg-neutral-900 shrink-0">
+                        <div className="relative w-32 sm:w-40 aspect-video rounded overflow-hidden bg-neutral-900 shrink-0 shadow-md">
                           {stillImg && (
                             <img
                               src={stillImg}
                               alt={ep.name}
                               loading="lazy"
-                              className="w-full h-full object-cover"
+                              className="w-full h-full object-cover transition-transform duration-500 ease-nf-out group-hover:scale-105"
                             />
                           )}
-                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
-                            <div className="w-9 h-9 rounded-full border border-white bg-black/60 flex items-center justify-center">
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity duration-250 flex items-center justify-center">
+                            <div className="w-9 h-9 rounded-full border border-white bg-black/65 flex items-center justify-center transform scale-75 group-hover:scale-100 transition-transform duration-300 ease-nf-spring shadow-lg">
                               <Play className="w-4 h-4 fill-white text-white ml-0.5" />
                             </div>
                           </div>
                         </div>
                         <div className="min-w-0 flex-1 space-y-1">
                           <div className="flex items-center justify-between gap-3">
-                            <h3 className="text-sm sm:text-[15px] font-bold text-white truncate">
+                            <h3 className="text-sm sm:text-[15px] font-bold text-white group-hover:text-red-300 transition-colors truncate">
                               {ep.name || `Episodio ${ep.episode_number}`}
                             </h3>
                             {ep.runtime && (
@@ -758,7 +811,7 @@ export default function DetailModal({
                     <div
                       key={part.id}
                       onClick={() => openRelated(part)}
-                      className={`group rounded-md overflow-hidden bg-[#2f2f2f] cursor-pointer transition hover:ring-1 hover:ring-white/40 ${
+                      className={`group rounded-md overflow-hidden bg-[#2f2f2f] cursor-pointer netflix-card-transition hover:ring-1 hover:ring-white/40 ${
                         part.id === item.id ? 'ring-1 ring-[#E50914]' : ''
                       }`}
                     >
@@ -768,11 +821,11 @@ export default function DetailModal({
                             src={partImg}
                             alt={part.title}
                             loading="lazy"
-                            className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ease-nf-out"
                           />
                         )}
-                        <div className="absolute inset-0 bg-black/35 opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
-                          <div className="w-10 h-10 rounded-full border border-white bg-black/60 flex items-center justify-center">
+                        <div className="absolute inset-0 bg-black/35 opacity-0 group-hover:opacity-100 transition-opacity duration-250 flex items-center justify-center">
+                          <div className="w-10 h-10 rounded-full border border-white bg-black/60 flex items-center justify-center transform scale-75 group-hover:scale-100 transition-transform duration-300 ease-nf-spring">
                             <Play className="w-4 h-4 fill-white text-white ml-0.5" />
                           </div>
                         </div>
@@ -784,8 +837,8 @@ export default function DetailModal({
                       </div>
                       <div className="p-3.5 space-y-2">
                         <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-1.5 text-[11px] text-neutral-300">
-                            <span className="px-1 border border-white/35 rounded-[2px] text-[9px] font-bold">
+                          <div className="flex items-center gap-1.5 text-[11px] text-neutral-300 min-w-0">
+                            <span className="px-1 border border-white/35 rounded-[2px] text-[9px] font-bold shrink-0">
                               HD
                             </span>
                             <span className="font-semibold text-white truncate">{part.title}</span>
@@ -797,10 +850,10 @@ export default function DetailModal({
                                 e.stopPropagation();
                                 onToggleWatchlist(part);
                               }}
-                              className="w-7 h-7 rounded-full border border-white/50 hover:border-white flex items-center justify-center text-white shrink-0"
+                              className="nf-icon-btn w-7 h-7 rounded-full border border-white/50 hover:border-white flex items-center justify-center text-white shrink-0"
                               title={partInList ? 'Quitar de Mi lista' : 'Agregar a Mi lista'}
                             >
-                              {partInList ? <Check className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
+                              {partInList ? <Check className="w-3.5 h-3.5 animate-nfCheckPop" /> : <Plus className="w-3.5 h-3.5" />}
                             </button>
                           )}
                         </div>
@@ -838,7 +891,7 @@ export default function DetailModal({
                     <div
                       key={sim.id}
                       onClick={() => openRelated(sim)}
-                      className="group rounded-md overflow-hidden bg-[#2f2f2f] cursor-pointer transition hover:ring-1 hover:ring-white/30"
+                      className="group rounded-md overflow-hidden bg-[#2f2f2f] cursor-pointer netflix-card-transition hover:ring-1 hover:ring-white/30"
                     >
                       <div className="relative aspect-video bg-neutral-900 overflow-hidden">
                         {simImg && (
@@ -846,11 +899,11 @@ export default function DetailModal({
                             src={simImg}
                             alt={simTitle}
                             loading="lazy"
-                            className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ease-nf-out"
                           />
                         )}
-                        <div className="absolute inset-0 bg-black/35 opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
-                          <div className="w-10 h-10 rounded-full border border-white bg-black/60 flex items-center justify-center">
+                        <div className="absolute inset-0 bg-black/35 opacity-0 group-hover:opacity-100 transition-opacity duration-250 flex items-center justify-center">
+                          <div className="w-10 h-10 rounded-full border border-white bg-black/60 flex items-center justify-center transform scale-75 group-hover:scale-100 transition-transform duration-300 ease-nf-spring">
                             <Play className="w-4 h-4 fill-white text-white ml-0.5" />
                           </div>
                         </div>
@@ -877,10 +930,10 @@ export default function DetailModal({
                                 e.stopPropagation();
                                 onToggleWatchlist(sim);
                               }}
-                              className="w-8 h-8 rounded-full border border-white/50 hover:border-white flex items-center justify-center text-white shrink-0"
+                              className="nf-icon-btn w-8 h-8 rounded-full border border-white/50 hover:border-white flex items-center justify-center text-white shrink-0"
                               title={simInList ? 'Quitar de Mi lista' : 'Agregar a Mi lista'}
                             >
-                              {simInList ? <Check className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                              {simInList ? <Check className="w-4 h-4 animate-nfCheckPop" /> : <Plus className="w-4 h-4" />}
                             </button>
                           )}
                         </div>
@@ -900,7 +953,7 @@ export default function DetailModal({
                     type="button"
                     onClick={() => setShowAllSimilar((v) => !v)}
                     aria-label={showAllSimilar ? 'Mostrar menos títulos' : 'Mostrar más títulos'}
-                    className="absolute w-10 h-10 rounded-full border border-white/50 hover:border-white bg-[#181818] text-white flex items-center justify-center shadow-lg transition"
+                    className="nf-icon-btn absolute w-10 h-10 rounded-full border border-white/50 hover:border-white bg-[#181818] text-white flex items-center justify-center shadow-lg"
                   >
                     {showAllSimilar ? (
                       <ChevronUp className="w-5 h-5" />
@@ -949,30 +1002,109 @@ export default function DetailModal({
           </div>
         </div>
       </div>
+
       {downloadOpen && (
-        <div className="fixed inset-0 z-[70] bg-black/80 flex items-center justify-center p-4" onClick={(event) => event.stopPropagation()}>
-          <div role="dialog" aria-modal="true" aria-label="Descarga offline" className="w-full max-w-lg rounded-xl border border-white/20 bg-[#202020] p-5 shadow-2xl text-white max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between gap-3 mb-4"><h2 className="text-lg font-bold flex items-center gap-2"><Download size={19} /> Descargar para ver offline</h2><button type="button" onClick={() => setDownloadOpen(false)} aria-label="Cerrar descargas"><X size={20} /></button></div>
-            <p className="text-sm text-neutral-300 mb-4">{title}{isTv ? ` · Temporada ${selectedSeason}, episodio ${downloadEpisode}` : ''}</p>
-            {isTv && <label className="text-xs text-neutral-300 block mb-3">Episodio <input type="number" min="1" max="999" value={downloadEpisode} onChange={event => setDownloadEpisode(Number(event.target.value) || 1)} onBlur={() => void loadDownloadSources(downloadEpisode)} className="ml-2 w-20 rounded bg-black/60 p-2" /></label>}
-            <label className="text-xs text-neutral-300 block mb-3">Calidad offline
-              <select value={downloadQuality} onChange={event => setDownloadQuality(event.target.value)} className="block w-full mt-1 rounded bg-black/60 p-2 text-sm text-white">
+        <div
+          className={`fixed inset-0 z-[70] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 ${
+            downloadClosing ? 'animate-nfBackdropOut pointer-events-none' : 'animate-nfBackdrop'
+          }`}
+          onClick={(event) => {
+            event.stopPropagation();
+            closeDownloadModal();
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Descarga offline"
+            onClick={(event) => event.stopPropagation()}
+            className={`w-full max-w-lg rounded-2xl border border-white/20 bg-[#202020] p-5 shadow-[0_30px_90px_rgba(0,0,0,0.95)] text-white max-h-[90vh] overflow-y-auto ${
+              downloadClosing ? 'animate-modalSlideDown' : 'animate-modalSlideUp'
+            }`}
+          >
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <h2 className="text-lg font-bold flex items-center gap-2">
+                <Download size={19} className="text-[#E50914]" /> Descargar para ver offline
+              </h2>
+              <button
+                type="button"
+                onClick={closeDownloadModal}
+                aria-label="Cerrar descargas"
+                className="nf-icon-btn p-1.5 rounded-full bg-white/5 hover:bg-white/15 text-neutral-300 hover:text-white"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <p className="text-sm text-neutral-300 mb-4">
+              {title}{isTv ? ` · Temporada ${selectedSeason}, episodio ${downloadEpisode}` : ''}
+            </p>
+            {isTv && (
+              <label className="text-xs text-neutral-300 block mb-3">
+                Episodio
+                <input
+                  type="number"
+                  min="1"
+                  max="999"
+                  value={downloadEpisode}
+                  onChange={(event) => setDownloadEpisode(Number(event.target.value) || 1)}
+                  onBlur={() => void loadDownloadSources(downloadEpisode)}
+                  className="ml-2 w-20 rounded-lg bg-black/60 border border-white/15 p-2 text-white focus:border-[#E50914] outline-none transition-colors"
+                />
+              </label>
+            )}
+            <label className="text-xs text-neutral-300 block mb-3">
+              Calidad offline
+              <select
+                value={downloadQuality}
+                onChange={(event) => setDownloadQuality(event.target.value)}
+                className="block w-full mt-1 rounded-lg bg-black/60 border border-white/15 p-2 text-sm text-white focus:border-[#E50914] outline-none transition-colors"
+              >
                 <option value="compact">Compacta · 720p máximo, video H.264 y audio AAC</option>
                 <option value="original">Original · sin recomprimir, MP4/WebM hasta 2 GB</option>
               </select>
             </label>
-            <p className="text-xs text-neutral-400 mb-3">La versión compacta guarda la película o el episodio completo. Su tamaño final depende de la duración y del origen; la conversión puede tardar.</p>
-            <label className="text-xs text-neutral-300 block mb-2">Fuente encontrada
-              <select value={downloadIndex} onChange={event => setDownloadIndex(Number(event.target.value))} disabled={!downloadSources.length} className="block w-full mt-1 rounded bg-black/60 p-2 text-sm text-white disabled:opacity-50">
-                {downloadSources.length ? downloadSources.map((stream, index) => <option key={`${stream.infoHash || stream.url}-${index}`} value={index}>{stream.source || 'Fuente'} · {stream.resolution || 'HD'} · {stream.language || 'Idioma sin confirmar'} {stream.size ? `· ${stream.size}` : ''}</option>) : <option>{downloadLoading ? 'Buscando fuentes…' : 'Sin fuentes automáticas'}</option>}
+            <p className="text-xs text-neutral-400 mb-3">
+              La versión compacta guarda la película o el episodio completo. Su tamaño final depende de la duración y del origen; la conversión puede tardar.
+            </p>
+            <label className="text-xs text-neutral-300 block mb-2">
+              Fuente encontrada
+              <select
+                value={downloadIndex}
+                onChange={(event) => setDownloadIndex(Number(event.target.value))}
+                disabled={!downloadSources.length}
+                className="block w-full mt-1 rounded-lg bg-black/60 border border-white/15 p-2 text-sm text-white disabled:opacity-50 focus:border-[#E50914] outline-none transition-colors"
+              >
+                {downloadSources.length ? (
+                  downloadSources.map((stream, index) => (
+                    <option key={`${stream.infoHash || stream.url}-${index}`} value={index}>
+                      {stream.source || 'Fuente'} · {stream.resolution || 'HD'} · {stream.language || 'Idioma sin confirmar'} {stream.size ? `· ${stream.size}` : ''}
+                    </option>
+                  ))
+                ) : (
+                  <option>{downloadLoading ? 'Buscando fuentes…' : 'Sin fuentes automáticas'}</option>
+                )}
               </select>
             </label>
-            <label className="text-xs text-neutral-300 block mb-4">O pega un enlace MP4/WebM directo propio
-              <input type="url" value={downloadUrl} onChange={event => setDownloadUrl(event.target.value)} placeholder="https://servidor.example/video.mp4" className="block w-full mt-1 rounded bg-black/60 p-2 text-sm text-white" />
+            <label className="text-xs text-neutral-300 block mb-4">
+              O pega un enlace MP4/WebM directo propio
+              <input
+                type="url"
+                value={downloadUrl}
+                onChange={(event) => setDownloadUrl(event.target.value)}
+                placeholder="https://servidor.example/video.mp4"
+                className="block w-full mt-1 rounded-lg bg-black/60 border border-white/15 p-2 text-sm text-white focus:border-[#E50914] outline-none transition-colors"
+              />
             </label>
-            {downloadError && <p role="alert" className="text-xs text-amber-300 mb-3">{downloadError}</p>}
-            {downloadSuccess && <p role="status" className="text-xs text-emerald-300 mb-3">{downloadSuccess}</p>}
-            <button type="button" onClick={startOfflineDownload} disabled={downloadBusy || downloadLoading || (!downloadUrl.trim() && !downloadSources.length)} className="w-full rounded bg-white text-black font-bold py-2.5 disabled:opacity-50">{downloadBusy ? 'Iniciando…' : 'Iniciar descarga offline'}</button>
+            {downloadError && <p role="alert" className="text-xs text-amber-300 mb-3 animate-nfTabContent">{downloadError}</p>}
+            {downloadSuccess && <p role="status" className="text-xs text-emerald-300 mb-3 animate-nfTabContent">{downloadSuccess}</p>}
+            <button
+              type="button"
+              onClick={startOfflineDownload}
+              disabled={downloadBusy || downloadLoading || (!downloadUrl.trim() && !downloadSources.length)}
+              className="hero-primary-cta w-full rounded-md bg-white text-black font-bold py-2.5 disabled:opacity-50"
+            >
+              {downloadBusy ? 'Iniciando…' : 'Iniciar descarga offline'}
+            </button>
           </div>
         </div>
       )}

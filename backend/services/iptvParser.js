@@ -26,6 +26,129 @@ export const COUNTRY_NAMES = {
   'es-global': 'Internacional',
 };
 
+export const FALLBACK_LIVE_CHANNELS = [
+  {
+    id: 'dw-espanol',
+    name: 'DW Español',
+    fullName: 'DW Español (1080p)',
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/7/75/Deutsche_Welle_symbol_2012.svg/512px-Deutsche_Welle_symbol_2012.svg.png',
+    category: 'Noticias',
+    rawCategory: 'News',
+    country: 'es-global',
+    countryName: 'Internacional',
+    source: 'Oficial FAST',
+    quality: '1080P',
+    isHevcHint: false,
+    isGeoBlocked: false,
+    url: 'https://dwamdstream104.akamaized.net/hls/live/2015530/dwstream104/index.m3u8',
+  },
+  {
+    id: 'france24-es',
+    name: 'France 24 Español',
+    fullName: 'France 24 Español HD',
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/8a/France24.png/512px-France24.png',
+    category: 'Noticias',
+    rawCategory: 'News',
+    country: 'es-global',
+    countryName: 'Internacional',
+    source: 'Oficial FAST',
+    quality: '1080P',
+    isHevcHint: false,
+    isGeoBlocked: false,
+    url: 'https://amg00106-france24-france24-spanish-ay859.amagi.tv/playlist/amg00106-france24-france24-spanish-ay859/playlist.m3u8',
+  },
+  {
+    id: 'rtve-24h',
+    name: 'Canal 24 Horas RTVE',
+    fullName: 'Canal 24 Horas España',
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/07/Logo_TVE-24h.svg/512px-Logo_TVE-24h.svg.png',
+    category: 'España',
+    rawCategory: 'News;Spain',
+    country: 'es',
+    countryName: 'España',
+    source: 'RTVE Directo',
+    quality: '1080P',
+    isHevcHint: false,
+    isGeoBlocked: false,
+    url: 'https://ztnr.rtve.es/ztnr/1694255.m3u8',
+  },
+  {
+    id: 'redbull-tv',
+    name: 'Red Bull TV',
+    fullName: 'Red Bull TV Deportes & Aventura 24/7',
+    logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c5/Red_Bull_ GmbH_logo.svg/512px-Red_Bull_GmbH_logo.svg.png',
+    category: 'Deportes',
+    rawCategory: 'Sports',
+    country: 'global',
+    countryName: 'Internacional',
+    source: 'Red Bull Media',
+    quality: '1080P',
+    isHevcHint: false,
+    isGeoBlocked: false,
+    url: 'https://rbmn-live.akamaized.net/hls/live/590964/BoRB-AT/master.m3u8',
+  },
+  {
+    id: 'pluto-cine-accion',
+    name: 'Pluto TV Cine Acción',
+    fullName: 'Pluto TV Cine Acción 24/7',
+    logo: 'https://ui-avatars.com/api/?name=Cine+Accion&background=E50914&color=fff&size=128&bold=true',
+    category: 'Películas y Series',
+    rawCategory: 'Movies',
+    country: 'latam',
+    countryName: 'Latinoamérica',
+    source: 'Pluto TV',
+    quality: 'HD',
+    isHevcHint: false,
+    isGeoBlocked: false,
+    url: 'https://service-stitcher.clusters.pluto.tv/v1/stitch/embed/hls/channel/5dcde06574449f0009096f6b/master.m3u8?advertisingId=channel&appName=rokuchannel&appVersion=1.0&bmodel=bm1&channel_id=channel&content=channel&content_rating=ROKU_ADS_CONTENT_RATING&content_type=livefeed&coppa=false&deviceDNT=1&deviceId=channel&deviceMake=rokuChannel&deviceModel=web&deviceType=rokuChannel&deviceVersion=1.0&embedPartner=rokuChannel&genre=ROKU_ADS_CONTENT_GENRE&is_lat=1&platform=web&rdid=channel&studio_id=viacom&tags=ROKU_CONTENT_TAGS',
+  },
+  {
+    id: 'pluto-cine-estelar',
+    name: 'Pluto TV Cine Estelar',
+    fullName: 'Pluto TV Cine Estelar 24/7',
+    logo: 'https://ui-avatars.com/api/?name=Cine+Estelar&background=E50914&color=fff&size=128&bold=true',
+    category: 'Películas y Series',
+    rawCategory: 'Movies',
+    country: 'latam',
+    countryName: 'Latinoamérica',
+    source: 'Pluto TV',
+    quality: 'HD',
+    isHevcHint: false,
+    isGeoBlocked: false,
+    url: 'https://service-stitcher.clusters.pluto.tv/v1/stitch/embed/hls/channel/5dcddf1ed95e74000997f61e/master.m3u8?advertisingId=channel&appName=rokuchannel&appVersion=1.0&bmodel=bm1&channel_id=channel&content=channel&content_rating=ROKU_ADS_CONTENT_RATING&content_type=livefeed&coppa=false&deviceDNT=1&deviceId=channel&deviceMake=rokuChannel&deviceModel=web&deviceType=rokuChannel&deviceVersion=1.0&embedPartner=rokuChannel&genre=ROKU_ADS_CONTENT_GENRE&is_lat=1&platform=web&rdid=channel&studio_id=viacom&tags=ROKU_CONTENT_TAGS',
+  },
+  {
+    id: 'pluto-anime',
+    name: 'Pluto TV Anime 24/7',
+    fullName: 'Pluto TV Anime',
+    logo: 'https://ui-avatars.com/api/?name=Anime+24/7&background=F47521&color=fff&size=128&bold=true',
+    category: 'Infantil y Anime',
+    rawCategory: 'Anime',
+    country: 'latam',
+    countryName: 'Latinoamérica',
+    source: 'Pluto TV',
+    quality: 'HD',
+    isHevcHint: false,
+    isGeoBlocked: false,
+    url: 'https://service-stitcher.clusters.pluto.tv/v1/stitch/embed/hls/channel/5e836e363390d00007f82a02/master.m3u8?advertisingId=channel&appName=rokuchannel&appVersion=1.0&bmodel=bm1&channel_id=channel&content=channel&content_rating=ROKU_ADS_CONTENT_RATING&content_type=livefeed&coppa=false&deviceDNT=1&deviceId=channel&deviceMake=rokuChannel&deviceModel=web&deviceType=rokuChannel&deviceVersion=1.0&embedPartner=rokuChannel&genre=ROKU_ADS_CONTENT_GENRE&is_lat=1&platform=web&rdid=channel&studio_id=viacom&tags=ROKU_CONTENT_TAGS',
+  },
+  {
+    id: 'telemedellin-co',
+    name: 'Telemedellín',
+    fullName: 'Telemedellín Colombia HD',
+    logo: 'https://ui-avatars.com/api/?name=Telemedellin&background=d97706&color=fff&size=128&bold=true',
+    category: 'Colombia',
+    rawCategory: 'Colombia',
+    country: 'co',
+    countryName: 'Colombia',
+    source: 'Señal Abierta CO',
+    quality: '1080P',
+    isHevcHint: false,
+    isGeoBlocked: false,
+    url: 'https://str.telemedellin.tv/hls/telemedellin.m3u8',
+  },
+];
+
 let aggregatedCache = null;
 let lastCacheTime = 0;
 const CACHE_TTL = 10 * 60 * 1000;
@@ -280,7 +403,7 @@ export async function getAggregatedChannels(options = {}) {
       if (!forceRefresh && saved && now - saved.at < CACHE_TTL) return saved.channels;
       try {
         const res = await axios.get(src.url, {
-          timeout: 15000,
+          timeout: 7500,
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
           },
@@ -312,7 +435,14 @@ export async function getAggregatedChannels(options = {}) {
       }
     }
 
-    // Priorizar canales no-HEVC primero para evitar pantallas negras por defecto
+    // Siempre garantizar señales base de respaldo y priorizar canales no-HEVC primero
+    for (const fb of FALLBACK_LIVE_CHANNELS) {
+      const normUrl = fb.url.toLowerCase().trim();
+      if (!seenUrls.has(normUrl)) {
+        seenUrls.add(normUrl);
+        merged.push({ ...fb });
+      }
+    }
     merged.sort((a, b) => Number(Boolean(a.isHevcHint)) - Number(Boolean(b.isHevcHint)));
 
     aggregatedCache = merged;
@@ -378,7 +508,7 @@ export async function proxyStream(streamUrl, req, res) {
     if (!['http:', 'https:'].includes(target.protocol) || target.username || target.password) return res.status(400).json({ error: 'Se requiere una URL HTTP o HTTPS de medios' });
     const response = await axios({ method: req.method === 'HEAD' ? 'head' : 'get', url: target.href, responseType: 'stream', timeout: 14000, maxRedirects: 5, signal: controller.signal,
       validateStatus: status => status >= 200 && status < 300 || status === 416,
-      headers: { 'User-Agent': req.query.ua || 'StreamFlix/5.2', Referer: req.query.ref || target.origin + '/', Origin: target.origin, Accept: '*/*', 'Accept-Encoding': 'identity', ...(req.headers.range ? { Range: req.headers.range } : {}) },
+      headers: { 'User-Agent': req.query.ua || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36', Referer: req.query.ref || target.origin + '/', Origin: target.origin, Accept: '*/*', 'Accept-Encoding': 'identity', ...(req.headers.range ? { Range: req.headers.range } : {}) },
     });
     upstream = response.data;
     res.setHeader('Cache-Control', 'no-store');
@@ -398,10 +528,16 @@ export async function proxyStream(streamUrl, req, res) {
       if (size > 2 * 1024 * 1024) throw new Error('Manifiesto demasiado grande');
       const finalUrl = response.request?.res?.responseUrl || target.href;
       const proxied = value => {
-        const resolved = new URL(value.trim(), finalUrl); if (!['http:', 'https:'].includes(resolved.protocol)) throw new Error('URI no admitida');
-        const params = new URLSearchParams({ url: resolved.href });
-        if (req.query.ref) params.set('ref', req.query.ref); if (req.query.ua) params.set('ua', req.query.ua);
-        return '/api/iptv/proxy?' + params;
+        try {
+          const resolved = new URL(value.trim(), finalUrl);
+          if (!['http:', 'https:'].includes(resolved.protocol)) return value;
+          const params = new URLSearchParams({ url: resolved.href });
+          if (req.query.ref) params.set('ref', req.query.ref);
+          if (req.query.ua) params.set('ua', req.query.ua);
+          return '/api/iptv/proxy?' + params;
+        } catch {
+          return value;
+        }
       };
       const result = Buffer.concat(chunks).toString('utf8').split(/\r?\n/).map(line => !line.trim() ? line : line.startsWith('#') ? line.replace(/\bURI="([^"]+)"/g, (_, value) => 'URI="' + proxied(value) + '"') : proxied(line)).join('\n');
       return res.type('application/vnd.apple.mpegurl').send(result);

@@ -31,13 +31,16 @@
   font-display: swap;
 }
 
-
 @layer base {
   :root {
     --netflix-red: #E50914;
     --netflix-dark-red: #B81D24;
     --netflix-black: #141414;
     --netflix-surface: #181818;
+    --ease-nf-out: cubic-bezier(0.16, 1, 0.3, 1);
+    --ease-nf-spring: cubic-bezier(0.22, 1.25, 0.36, 1);
+    --ease-nf-cinematic: cubic-bezier(0.22, 1, 0.36, 1);
+    --ease-nf-smooth: cubic-bezier(0.25, 0.1, 0.25, 1);
   }
 
   html {
@@ -70,6 +73,7 @@
   background: #333333;
   border-radius: 9999px;
   border: 2px solid #0f0f0f;
+  transition: background-color 0.25s var(--ease-nf-smooth);
 }
 
 ::-webkit-scrollbar-thumb:hover {
@@ -85,7 +89,10 @@
   scrollbar-width: none;
 }
 
-/* Netflix Micro-Animations & Keyframes */
+/* ============================================================================
+ * MOTOR DE ANIMACIONES ESTILO NETFLIX (HAWKINS MOTION SYSTEM 60FPS)
+ * ============================================================================ */
+
 @keyframes fadeIn {
   from {
     opacity: 0;
@@ -95,22 +102,72 @@
   }
 }
 
-@keyframes modalSlideUp {
+@keyframes nfPageEnter {
   0% {
     opacity: 0;
-    transform: translateY(28px) scale(0.96);
+    transform: translate3d(0, 12px, 0);
   }
   100% {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes nfBackdropFade {
+  0% {
+    opacity: 0;
+    backdrop-filter: blur(0px);
+  }
+  100% {
+    opacity: 1;
+    backdrop-filter: blur(8px);
+  }
+}
+
+@keyframes modalSlideUp {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 34px, 0) scale(0.93);
+  }
+  65% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes nfBackdropFadeOut {
+  0% {
+    opacity: 1;
+    backdrop-filter: blur(8px);
+  }
+  100% {
+    opacity: 0;
+    backdrop-filter: blur(0px);
+  }
+}
+
+@keyframes modalSlideDown {
+  0% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  35% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(0, 34px, 0) scale(0.93);
   }
 }
 
 @keyframes heroContentSlide {
   0% {
     opacity: 0;
-    transform: translate3d(-24px, 14px, 0);
-    filter: blur(6px);
+    transform: translate3d(-22px, 14px, 0);
+    filter: blur(5px);
   }
   100% {
     opacity: 1;
@@ -119,12 +176,23 @@
   }
 }
 
+@keyframes heroStaggerUp {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 16px, 0);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
 @keyframes heroKenBurns {
   0% {
-    opacity: 0.25;
-    transform: scale(1.08);
+    opacity: 0.22;
+    transform: scale(1.085);
   }
-  15% {
+  16% {
     opacity: 1;
   }
   100% {
@@ -145,22 +213,126 @@
 @keyframes carouselRowSlide {
   0% {
     opacity: 0;
-    transform: translateY(18px);
+    transform: translate3d(0, 20px, 0);
   }
   100% {
     opacity: 1;
-    transform: translateY(0);
+    transform: translate3d(0, 0, 0);
   }
 }
 
 @keyframes panelEnter {
-  from { opacity: 0; transform: translateY(14px) scale(0.985); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 14px, 0) scale(0.975);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes nfDropdown {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, -10px, 0) scale(0.96);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes nfPopoverUp {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 12px, 0) scale(0.96);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes nfDrawerRight {
+  0% {
+    opacity: 0;
+    transform: translate3d(28px, 0, 0) scale(0.985);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes nfTabContent {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 7px, 0);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes nfAccordion {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, -6px, 0);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes nfCheckPop {
+  0% {
+    transform: scale(0.55) rotate(-12deg);
+    opacity: 0.4;
+  }
+  60% {
+    transform: scale(1.22) rotate(4deg);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+    opacity: 1;
+  }
+}
+
+@keyframes nfToastPop {
+  0% {
+    opacity: 0;
+    transform: translate3d(-50%, -14px, 0) scale(0.92);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(-50%, 0, 0) scale(1);
+  }
+}
+
+@keyframes nfCueFade {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 4px, 0) scale(0.985);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
 }
 
 @keyframes playerReveal {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  0% {
+    opacity: 0;
+    transform: scale(1.015);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 @keyframes eqBarPulse {
@@ -190,20 +362,56 @@
   }
 }
 
+/* Clases utilitarias de animación */
 .animate-fadeIn {
-  animation: fadeIn 0.28s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: fadeIn 0.28s var(--ease-nf-out) forwards;
+}
+
+.animate-nfPageEnter {
+  animation: nfPageEnter 0.38s var(--ease-nf-out) both;
+}
+
+.animate-nfBackdrop {
+  animation: nfBackdropFade 0.32s var(--ease-nf-out) forwards;
 }
 
 .animate-modalSlideUp {
-  animation: modalSlideUp 0.36s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: modalSlideUp 0.42s var(--ease-nf-out) forwards;
+  will-change: transform, opacity;
+}
+
+.animate-nfBackdropOut {
+  animation: nfBackdropFadeOut 0.3s var(--ease-nf-out) forwards;
+}
+
+.animate-modalSlideDown {
+  animation: modalSlideDown 0.32s var(--ease-nf-out) forwards;
+  will-change: transform, opacity;
 }
 
 .animate-heroContent {
-  animation: heroContentSlide 0.55s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: heroContentSlide 0.55s var(--ease-nf-out) forwards;
+}
+
+.animate-heroStagger-1 {
+  animation: heroStaggerUp 0.48s var(--ease-nf-out) 0.04s both;
+}
+.animate-heroStagger-2 {
+  animation: heroStaggerUp 0.52s var(--ease-nf-out) 0.09s both;
+}
+.animate-heroStagger-3 {
+  animation: heroStaggerUp 0.56s var(--ease-nf-out) 0.14s both;
+}
+.animate-heroStagger-4 {
+  animation: heroStaggerUp 0.58s var(--ease-nf-out) 0.19s both;
+}
+.animate-heroStagger-5 {
+  animation: heroStaggerUp 0.62s var(--ease-nf-out) 0.24s both;
 }
 
 .animate-heroBackdrop {
-  animation: heroKenBurns 9s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation: heroKenBurns 9s var(--ease-nf-cinematic) forwards;
+  will-change: transform, opacity;
 }
 
 .animate-slideProgress {
@@ -211,52 +419,262 @@
 }
 
 .animate-rowReveal {
-  animation: carouselRowSlide 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: carouselRowSlide 0.48s var(--ease-nf-out) forwards;
 }
 
-.animate-panelEnter { animation: panelEnter 0.38s cubic-bezier(0.16, 1, 0.3, 1) both; }
-.animate-playerReveal { animation: playerReveal 0.32s ease-out both; }
-.profile-panel { animation: panelEnter 0.42s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.animate-panelEnter {
+  animation: panelEnter 0.36s var(--ease-nf-out) both;
+  will-change: transform, opacity;
+}
+
+.animate-nfDropdown {
+  animation: nfDropdown 0.26s var(--ease-nf-out) both;
+  transform-origin: top right;
+  will-change: transform, opacity;
+}
+
+.animate-nfDropdownLeft {
+  animation: nfDropdown 0.26s var(--ease-nf-out) both;
+  transform-origin: top left;
+  will-change: transform, opacity;
+}
+
+.animate-nfPopoverUp {
+  animation: nfPopoverUp 0.28s var(--ease-nf-out) both;
+  transform-origin: bottom left;
+  will-change: transform, opacity;
+}
+
+.animate-nfPopoverUpRight {
+  animation: nfPopoverUp 0.28s var(--ease-nf-out) both;
+  transform-origin: bottom right;
+  will-change: transform, opacity;
+}
+
+.animate-nfDrawerRight {
+  animation: nfDrawerRight 0.34s var(--ease-nf-out) both;
+  will-change: transform, opacity;
+}
+
+.animate-nfTabContent {
+  animation: nfTabContent 0.24s var(--ease-nf-out) both;
+}
+
+.animate-nfAccordion {
+  animation: nfAccordion 0.22s var(--ease-nf-out) both;
+}
+
+.animate-nfCheckPop {
+  animation: nfCheckPop 0.34s var(--ease-nf-spring) both;
+}
+
+.animate-nfToastPop {
+  animation: nfToastPop 0.32s var(--ease-nf-spring) both;
+}
+
+.animate-nfCueFade {
+  animation: nfCueFade 0.16s var(--ease-nf-out) both;
+}
+
+.animate-playerReveal {
+  animation: playerReveal 0.36s var(--ease-nf-out) both;
+}
+
+/* Micro-interacciones universales de botones y controles estilo Netflix */
+.nf-btn {
+  transition: transform 0.24s var(--ease-nf-spring),
+              background-color 0.22s var(--ease-nf-smooth),
+              border-color 0.22s var(--ease-nf-smooth),
+              color 0.2s var(--ease-nf-smooth),
+              box-shadow 0.26s var(--ease-nf-out),
+              filter 0.22s var(--ease-nf-smooth);
+  will-change: transform;
+}
+.nf-btn:hover:not(:disabled) {
+  transform: translateY(-1px) scale(1.025);
+}
+.nf-btn:active:not(:disabled) {
+  transform: translateY(0) scale(0.96);
+  transition-duration: 0.08s;
+}
+
+.nf-icon-btn {
+  transition: transform 0.26s var(--ease-nf-spring),
+              background-color 0.22s var(--ease-nf-smooth),
+              border-color 0.22s var(--ease-nf-smooth),
+              color 0.2s var(--ease-nf-smooth),
+              box-shadow 0.26s var(--ease-nf-out);
+  will-change: transform;
+}
+.nf-icon-btn:hover:not(:disabled) {
+  transform: scale(1.1);
+  box-shadow: 0 0 20px rgba(255, 255, 255, 0.16);
+}
+.nf-icon-btn:active:not(:disabled) {
+  transform: scale(0.91);
+  transition-duration: 0.08s;
+}
+
+.nf-pill {
+  transition: transform 0.26s var(--ease-nf-spring),
+              background-color 0.24s var(--ease-nf-smooth),
+              border-color 0.24s var(--ease-nf-smooth),
+              color 0.2s var(--ease-nf-smooth),
+              box-shadow 0.26s var(--ease-nf-out);
+}
+.nf-pill:hover:not(:disabled) {
+  transform: translateY(-1.5px) scale(1.03);
+}
+.nf-pill:active:not(:disabled) {
+  transform: translateY(0) scale(0.96);
+  transition-duration: 0.08s;
+}
+
+.nf-shuffle-btn svg {
+  transition: transform 0.38s var(--ease-nf-spring);
+}
+.nf-shuffle-btn:hover svg {
+  transform: rotate(180deg) scale(1.1);
+}
+
+.nf-refresh-btn svg {
+  transition: transform 0.45s var(--ease-nf-spring);
+}
+.nf-refresh-btn:hover svg {
+  transform: rotate(95deg);
+}
+
+/* Paneles de Perfil */
+.profile-panel {
+  animation: panelEnter 0.42s var(--ease-nf-out) both;
+  transition: border-color 0.28s var(--ease-nf-smooth), box-shadow 0.28s var(--ease-nf-out);
+}
+.profile-panel:hover {
+  border-color: rgba(255, 255, 255, 0.18);
+  box-shadow: 0 18px 40px -12px rgba(0, 0, 0, 0.75);
+}
 .space-y-6 > .profile-panel:nth-child(1) { animation-delay: 75ms; }
 .space-y-6 > .profile-panel:nth-child(2) { animation-delay: 140ms; }
-.profile-avatar { transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.35s ease; }
-.profile-avatar:hover { transform: scale(1.045); box-shadow: 0 16px 42px rgba(229, 9, 20, 0.2); }
+.profile-avatar {
+  transition: transform 0.35s var(--ease-nf-spring), box-shadow 0.35s var(--ease-nf-out);
+}
+.profile-avatar:hover {
+  transform: scale(1.055);
+  box-shadow: 0 16px 42px rgba(229, 9, 20, 0.26);
+}
 
+/* Barra de Navegación Superior */
+.nav-item {
+  transition: color 0.22s var(--ease-nf-smooth),
+              background-color 0.24s var(--ease-nf-out),
+              transform 0.22s var(--ease-nf-spring);
+}
+.nav-item:hover {
+  background-color: rgba(255, 255, 255, 0.06);
+}
+.nav-item:active {
+  transform: scale(0.95);
+}
 .nav-item::after {
   content: '';
   position: absolute;
   right: 0.65rem;
-  bottom: -0.32rem;
+  bottom: -0.28rem;
   left: 0.65rem;
-  height: 2px;
-  border-radius: 2px;
+  height: 2.5px;
+  border-radius: 999px;
   background: #e50914;
+  box-shadow: 0 0 10px rgba(229, 9, 20, 0.65);
   transform: scaleX(0);
   transform-origin: center;
-  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform 0.3s var(--ease-nf-out);
 }
-.nav-item:hover::after, .nav-item--active::after { transform: scaleX(1); }
+.nav-item:hover::after,
+.nav-item--active::after {
+  transform: scaleX(1);
+}
 
-.platform-hub { isolation: isolate; }
+/* Hubs de Plataforma */
+.platform-hub {
+  isolation: isolate;
+  transition: transform 0.34s var(--ease-nf-out),
+              background-color 0.28s var(--ease-nf-smooth),
+              border-color 0.28s var(--ease-nf-smooth),
+              box-shadow 0.34s var(--ease-nf-out);
+}
+.platform-hub:hover {
+  transform: translateY(-4px) scale(1.02);
+  box-shadow: 0 16px 34px -8px rgba(0, 0, 0, 0.85);
+}
+.platform-hub:active {
+  transform: translateY(-1px) scale(0.98);
+}
 .platform-hub::after {
   content: '';
   position: absolute;
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  background: linear-gradient(115deg, transparent 30%, rgba(255,255,255,0.09) 50%, transparent 70%);
-  transform: translateX(-110%);
-  transition: transform 0.55s cubic-bezier(0.16, 1, 0.3, 1);
+  background: linear-gradient(115deg, transparent 30%, rgba(255, 255, 255, 0.11) 50%, transparent 70%);
+  transform: translateX(-115%);
+  transition: transform 0.6s var(--ease-nf-out);
 }
-.platform-hub:hover::after { transform: translateX(110%); }
-.platform-hub > :not(:first-child) { position: relative; z-index: 1; }
+.platform-hub:hover::after {
+  transform: translateX(115%);
+}
+.platform-hub > :not(:first-child) {
+  position: relative;
+  z-index: 1;
+}
 
-.hero-primary-cta svg { transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1); }
-.hero-primary-cta:hover svg, .hero-primary-cta:focus-visible svg { transform: translateX(3px) scale(1.08); }
-.hero-slide-chip { transition: background-color 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease, filter 0.25s ease; }
-.hero-slide-chip:hover, .hero-slide-chip:focus-visible { filter: brightness(1.22); box-shadow: 0 6px 22px rgba(0, 0, 0, 0.45); }
+/* Botones Hero Billboard */
+.hero-primary-cta {
+  transition: transform 0.26s var(--ease-nf-spring),
+              background-color 0.2s var(--ease-nf-smooth),
+              box-shadow 0.28s var(--ease-nf-out);
+}
+.hero-primary-cta:hover {
+  transform: scale(1.045);
+  box-shadow: 0 10px 32px rgba(255, 255, 255, 0.34);
+}
+.hero-primary-cta:active {
+  transform: scale(0.96);
+}
+.hero-primary-cta svg {
+  transition: transform 0.26s var(--ease-nf-spring);
+}
+.hero-primary-cta:hover svg,
+.hero-primary-cta:focus-visible svg {
+  transform: translateX(3px) scale(1.1);
+}
 
-.catalog-title { position: relative; display: inline-block; }
+.hero-slide-chip {
+  transition: transform 0.28s var(--ease-nf-spring),
+              background-color 0.25s var(--ease-nf-smooth),
+              border-color 0.25s var(--ease-nf-smooth),
+              box-shadow 0.28s var(--ease-nf-out),
+              filter 0.25s var(--ease-nf-smooth);
+}
+.hero-slide-chip:hover,
+.hero-slide-chip:focus-visible {
+  transform: translateY(-2px) scale(1.03);
+  filter: brightness(1.18);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+}
+.hero-slide-chip:active {
+  transform: translateY(0) scale(0.97);
+}
+
+/* Títulos de Filas y Tarjetas de Catálogo con Retardo Intencional Estilo Netflix */
+.catalog-title {
+  position: relative;
+  display: inline-block;
+  transition: transform 0.28s var(--ease-nf-out), color 0.25s ease;
+}
+.catalog-row:hover .catalog-title {
+  color: #ffffff;
+  transform: translateX(2px);
+}
 .catalog-title::after {
   content: '';
   position: absolute;
@@ -264,18 +682,92 @@
   right: 0;
   bottom: -4px;
   height: 2px;
+  border-radius: 999px;
   background: #e50914;
   transform: scaleX(0);
   transform-origin: left;
-  transition: transform 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform 0.34s var(--ease-nf-out);
 }
-.catalog-row:hover .catalog-title::after { transform: scaleX(1); }
-.media-card:focus-within { transform: translateY(-5px) scale(1.025); box-shadow: 0 22px 42px -10px rgba(0, 0, 0, 0.9); z-index: 2; }
-.media-card .card-play-icon { transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s ease; }
-.media-card:hover .card-play-icon, .media-card:focus-within .card-play-icon { transform: scale(1.1); box-shadow: 0 0 22px rgba(255, 255, 255, 0.25); }
+.catalog-row:hover .catalog-title::after {
+  transform: scaleX(1);
+}
 
-.episode-row { position: relative; transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.28s ease; }
-.episode-row:hover, .episode-row:focus-visible { transform: translateX(4px); }
+.netflix-card-transition {
+  transition: transform 0.38s var(--ease-nf-out) 0ms,
+              box-shadow 0.38s var(--ease-nf-out) 0ms,
+              border-color 0.25s ease 0ms,
+              filter 0.25s ease 0ms;
+  will-change: transform, box-shadow;
+}
+
+.netflix-card-transition:hover,
+.media-card:focus-within {
+  transform: translateY(-6px) scale(1.035);
+  box-shadow: 0 24px 48px -10px rgba(0, 0, 0, 0.92), 0 0 0 1px rgba(255, 255, 255, 0.22);
+  border-color: rgba(255, 255, 255, 0.3);
+  z-index: 15;
+  transition-delay: 55ms;
+}
+
+.netflix-card-transition:active {
+  transform: translateY(-2px) scale(0.99);
+  transition-delay: 0ms;
+  transition-duration: 0.1s;
+}
+
+.media-card .card-overlay-actions {
+  transform: translateY(8px);
+  opacity: 0;
+  transition: transform 0.32s var(--ease-nf-out), opacity 0.26s ease;
+}
+.media-card:hover .card-overlay-actions,
+.media-card:focus-within .card-overlay-actions {
+  transform: translateY(0);
+  opacity: 1;
+  transition-delay: 65ms;
+}
+
+.media-card .card-play-icon {
+  transition: transform 0.28s var(--ease-nf-spring), box-shadow 0.25s ease, background-color 0.2s ease;
+}
+.media-card:hover .card-play-icon,
+.media-card:focus-within .card-play-icon {
+  transform: scale(1.1);
+  box-shadow: 0 0 24px rgba(255, 255, 255, 0.32);
+}
+
+/* Filas de Episodios en DetailModal */
+.episode-row {
+  position: relative;
+  transition: transform 0.28s var(--ease-nf-out),
+              background-color 0.25s var(--ease-nf-smooth),
+              box-shadow 0.28s var(--ease-nf-out);
+}
+.episode-row::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 18%;
+  bottom: 18%;
+  width: 3px;
+  border-radius: 999px;
+  background: #e50914;
+  transform: scaleY(0);
+  transition: transform 0.26s var(--ease-nf-out);
+}
+.episode-row:hover,
+.episode-row:focus-visible {
+  transform: translateX(5px);
+}
+.episode-row:hover::before,
+.episode-row:focus-visible::before {
+  transform: scaleY(1);
+}
+.episode-row:active {
+  transform: translateX(2px) scale(0.995);
+}
+
+/* Tarjetas de Canal en TV en Vivo */
 .tv-channel-card::after {
   content: '';
   position: absolute;
@@ -285,15 +777,19 @@
   pointer-events: none;
   transition: border-color 0.28s ease, box-shadow 0.28s ease;
 }
-.tv-channel-card:hover::after, .tv-channel-card:focus-within::after { border-color: rgba(255, 255, 255, 0.4); box-shadow: inset 0 0 26px rgba(255, 255, 255, 0.06); }
+.tv-channel-card:hover::after,
+.tv-channel-card:focus-within::after {
+  border-color: rgba(255, 255, 255, 0.42);
+  box-shadow: inset 0 0 28px rgba(255, 255, 255, 0.07);
+}
 
 .catalog-row {
   opacity: 0;
-  transform: translateY(18px);
+  transform: translate3d(0, 18px, 0);
 }
 
 .catalog-row.is-visible {
-  animation: carouselRowSlide 0.55s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: carouselRowSlide 0.55s var(--ease-nf-out) forwards;
 }
 
 .animate-eq-1 {
@@ -317,20 +813,6 @@
   animation: shimmerSweep 1.6s infinite linear;
 }
 
-.netflix-card-transition {
-  transition: transform 0.38s cubic-bezier(0.16, 1, 0.3, 1),
-              box-shadow 0.38s cubic-bezier(0.16, 1, 0.3, 1),
-              border-color 0.25s ease,
-              filter 0.25s ease;
-}
-
-.netflix-card-transition:hover {
-  transform: translateY(-5px) scale(1.025);
-  box-shadow: 0 22px 42px -10px rgba(0, 0, 0, 0.9);
-  border-color: rgba(255, 255, 255, 0.28);
-  z-index: 2;
-}
-
 button:focus-visible,
 a:focus-visible,
 input:focus-visible,
@@ -339,17 +821,19 @@ select:focus-visible {
   outline-offset: 3px;
 }
 
+/* Scrubber y Sliders de Reproductor con Física Elástica Estilo Netflix */
 .player-progress {
   appearance: none;
   height: 4px;
   border-radius: 999px;
   cursor: pointer;
-  transition: height 0.18s ease;
+  transition: height 0.2s var(--ease-nf-out), box-shadow 0.2s ease;
 }
 
 .player-progress:hover,
 .player-progress:focus-visible {
-  height: 7px;
+  height: 8px;
+  box-shadow: 0 0 14px rgba(229, 9, 20, 0.45);
 }
 
 .player-progress::-webkit-slider-thumb {
@@ -358,12 +842,25 @@ select:focus-visible {
   height: 14px;
   border-radius: 50%;
   background: #e50914;
-  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.55);
+  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.55), 0 0 12px rgba(229, 9, 20, 0.65);
+  transform: scale(0.85);
+  transition: transform 0.22s var(--ease-nf-spring), box-shadow 0.22s ease;
+}
+
+.player-progress:hover::-webkit-slider-thumb,
+.player-progress:focus-visible::-webkit-slider-thumb {
+  transform: scale(1.28);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.22), 0 0 18px rgba(229, 9, 20, 0.9);
 }
 
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
-  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+  }
   .catalog-row { opacity: 1; transform: none; }
   .profile-panel { opacity: 1; transform: none; }
 }
@@ -404,13 +901,14 @@ video::cue {
   font-weight: 700;
 }
 
+/* Micro-animaciones de Cápsula de Reacción Estilo Netflix */
 @keyframes capsuleExpand {
   0% { transform: translate(-50%, -50%) scaleX(0.32) scaleY(0.85); opacity: 0; }
   100% { transform: translate(-50%, -50%) scaleX(1) scaleY(1); opacity: 1; }
 }
 
 @keyframes capsuleIconPop {
-  0% { transform: scale(0.8); opacity: 0; }
+  0% { transform: scale(0.75); opacity: 0; }
   100% { transform: scale(1); opacity: 1; }
 }
 
@@ -456,12 +954,12 @@ video::cue {
   100% { transform: rotate(var(--ang, 0deg)) translateY(-22px) scaleY(1.25) scaleX(0.4); opacity: 0; }
 }
 
-.animate-capsule-expand { animation: capsuleExpand 0.26s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-.animate-capsule-icon { animation: capsuleIconPop 0.16s ease-out both; }
-.animate-rate-dislike { animation: rateDislike 0.62s cubic-bezier(0.22, 1, 0.36, 1); }
-.animate-rate-like { animation: rateLike 0.58s cubic-bezier(0.22, 1, 0.36, 1); }
-.animate-rate-love-front { animation: rateLoveFront 0.75s cubic-bezier(0.22, 1, 0.36, 1); }
-.animate-rate-love-back { animation: rateLoveBack 0.75s cubic-bezier(0.22, 1, 0.36, 1) 0.045s; }
+.animate-capsule-expand { animation: capsuleExpand 0.26s var(--ease-nf-out) forwards; }
+.animate-capsule-icon { animation: capsuleIconPop 0.18s var(--ease-nf-spring) both; }
+.animate-rate-dislike { animation: rateDislike 0.62s var(--ease-nf-cinematic); }
+.animate-rate-like { animation: rateLike 0.58s var(--ease-nf-cinematic); }
+.animate-rate-love-front { animation: rateLoveFront 0.75s var(--ease-nf-cinematic); }
+.animate-rate-love-back { animation: rateLoveBack 0.75s var(--ease-nf-cinematic) 0.045s; }
 .animate-rate-ring { animation: rateRingPulse 0.38s ease-out 0.18s forwards; }
 .animate-rate-spark-line { animation: rateSparkLine 0.42s ease-out 0.2s forwards; }
 

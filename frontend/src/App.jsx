@@ -11,10 +11,9 @@ import ProfilePage from './components/ProfilePage.jsx';
 import DiscoveryRows, { buildGenreRows } from './components/DiscoveryRows.jsx';
 import useUserMedia, { computePersonalizedPool } from './hooks/useUserMedia.js';
 
-const SmartPlayer = React.lazy(() => import('./components/SmartPlayer.jsx'));
-const LiveTV = React.lazy(() => import('./components/LiveTV.jsx'));
-const DownloadsPage = React.lazy(() => import('./components/DownloadsPage.jsx'));
-const PremiumAccess = React.lazy(() => import('./components/PremiumAccess.jsx'));
+import SmartPlayer from './components/SmartPlayer.jsx';
+import LiveTV from './components/LiveTV.jsx';
+import DownloadsPage from './components/DownloadsPage.jsx';
 import {
   Film,
   Tv,
@@ -802,14 +801,12 @@ export default function App() {
       <main className="flex-1 pb-20">
         {activeTab === 'downloads' ? (
           <React.Suspense fallback={<p className="pt-28 text-center text-neutral-400">Cargando biblioteca offline…</p>}><DownloadsPage /></React.Suspense>
-        ) : activeTab === 'premium' ? (
-          <React.Suspense fallback={<p className="pt-28 text-center text-neutral-400">Cargando proveedores…</p>}><PremiumAccess onOpenLiveTv={() => setActiveTab('live_tv')} /></React.Suspense>
         ) : activeTab === 'live_tv' ? (
           <React.Suspense fallback={<p className="pt-28 text-center text-neutral-400">Preparando televisión en vivo…</p>}><LiveTV /></React.Suspense>
         ) : activeTab === 'profile' ? (
           <ProfilePage profile={profile} onSave={saveProfile} movieGenres={MOVIE_GENRES} seriesGenres={SERIES_GENRES} preferredLanguage={preferredLanguage} onChangeLanguage={setPreferredLanguage} audioEnginePreset={audioEnginePreset} onChangeAudioPreset={setAudioEnginePreset} />
         ) : activeTab === 'watchlist' ? (
-          <div className="pt-24 sm:pt-28 px-4 sm:px-8 lg:px-12 max-w-[1480px] mx-auto animate-fadeIn">
+          <div className="pt-24 sm:pt-28 px-4 sm:px-8 lg:px-12 max-w-[1480px] mx-auto animate-nfPageEnter">
             <h1 className="text-3xl font-black mb-2 flex items-center gap-3">
               <Bookmark className="w-8 h-8 text-amber-400" />
               <span>Mi Lista</span>
@@ -840,7 +837,7 @@ export default function App() {
           </div>
         ) : activeTab === 'anime' ? (
           /* PESTAÑA: ANIME CON SUB-BARRA DE GÉNEROS PERSONALIZADOS ESTILO NETFLIX Y CARGA 100% GARANTIZADA */
-          <div className="pb-16">
+          <div className="pb-16 animate-nfPageEnter">
             {animeHeroPool.length > 0 && (
               <HeroBanner
                 items={animeHeroPool}
@@ -897,7 +894,7 @@ export default function App() {
                         setSelectedGenre('all');
                         setSelectedSortBy('popularity.desc');
                       }}
-                      className="px-3.5 py-2 rounded-xl bg-white/10 hover:bg-[#E50914] text-xs font-extrabold text-white transition"
+                      className="nf-btn px-3.5 py-2 rounded-xl bg-white/10 hover:bg-[#E50914] text-xs font-extrabold text-white animate-capsule-icon"
                     >
                       Ver Todo
                     </button>
@@ -911,7 +908,7 @@ export default function App() {
                   <button
                     key={g.id}
                     onClick={() => setSelectedGenre(g.value)}
-                    className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all border flex items-center gap-1.5 ${
+                    className={`nf-pill px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap border flex items-center gap-1.5 ${
                       selectedGenre === g.value
                         ? 'bg-[#E50914] text-white border-red-400 shadow-lg shadow-red-950/50 scale-105'
                         : 'bg-[#181818]/90 hover:bg-neutral-800 text-neutral-300 border-white/[0.08]'
@@ -1054,7 +1051,7 @@ export default function App() {
             )}
           </div>
         ) : activeTab === 'search' ? (
-          <div className="pt-24 sm:pt-28 px-4 sm:px-8 lg:px-12 max-w-[1480px] mx-auto animate-fadeIn">
+          <div className="pt-24 sm:pt-28 px-4 sm:px-8 lg:px-12 max-w-[1480px] mx-auto animate-nfPageEnter">
             <h1 className="text-2xl font-extrabold mb-6 flex items-center gap-2">
               <span>Resultados para:</span>
               <span className="text-[#E50914] font-black italic">"{searchQuery}"</span>
@@ -1084,7 +1081,7 @@ export default function App() {
           </div>
         ) : activeTab === 'movies' ? (
           /* PESTAÑA: PELÍCULAS CON SELECTOR DE GÉNEROS PERSONALIZADO ESTILO NETFLIX */
-          <div className="pb-16">
+          <div className="pb-16 animate-nfPageEnter">
             {moviesHeroPool.length > 0 && (
               <HeroBanner
                 items={moviesHeroPool}
@@ -1138,7 +1135,7 @@ export default function App() {
                         setSelectedGenre('all');
                         setSelectedSortBy('popularity.desc');
                       }}
-                      className="px-3.5 py-2 rounded-xl bg-white/10 hover:bg-[#E50914] text-xs font-extrabold text-white transition"
+                      className="nf-btn px-3.5 py-2 rounded-xl bg-white/10 hover:bg-[#E50914] text-xs font-extrabold text-white animate-capsule-icon"
                     >
                       Ver Todo
                     </button>
@@ -1152,7 +1149,7 @@ export default function App() {
                   <button
                     key={g.id}
                     onClick={() => setSelectedGenre(g.value)}
-                    className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all border flex items-center gap-1.5 ${
+                    className={`nf-pill px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap border flex items-center gap-1.5 ${
                       selectedGenre === g.value
                         ? 'bg-[#E50914] text-white border-red-400 shadow-lg shadow-red-950/50 scale-105'
                         : 'bg-[#181818]/90 hover:bg-neutral-800 text-neutral-300 border-white/[0.08]'
@@ -1306,7 +1303,7 @@ export default function App() {
           </div>
         ) : activeTab === 'series' ? (
           /* PESTAÑA: SERIES DE TV CON SELECTOR DE GÉNEROS PERSONALIZADO ESTILO NETFLIX */
-          <div className="pb-16">
+          <div className="pb-16 animate-nfPageEnter">
             {seriesHeroPool.length > 0 && (
               <HeroBanner
                 items={seriesHeroPool}
@@ -1368,7 +1365,7 @@ export default function App() {
                         setSelectedNetwork('all');
                         setSelectedSortBy('popularity.desc');
                       }}
-                      className="px-3.5 py-2 rounded-xl bg-white/10 hover:bg-[#E50914] text-xs font-extrabold text-white transition"
+                      className="nf-btn px-3.5 py-2 rounded-xl bg-white/10 hover:bg-[#E50914] text-xs font-extrabold text-white animate-capsule-icon"
                     >
                       Ver Todo
                     </button>
@@ -1382,7 +1379,7 @@ export default function App() {
                   <button
                     key={g.id}
                     onClick={() => setSelectedGenre(g.value)}
-                    className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap transition-all border flex items-center gap-1.5 ${
+                    className={`nf-pill px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap border flex items-center gap-1.5 ${
                       selectedGenre === g.value
                         ? 'bg-[#E50914] text-white border-red-400 shadow-lg shadow-red-950/50 scale-105'
                         : 'bg-[#181818]/90 hover:bg-neutral-800 text-neutral-300 border-white/[0.08]'
@@ -1534,7 +1531,7 @@ export default function App() {
           </div>
         ) : (
           /* PESTAÑA: INICIO (HOME CON MOTOR ALGORÍTMICO DE RECOMENDACIÓN Y TAQUILLA) */
-          <>
+          <div className="animate-nfPageEnter">
             {homeHeroPool.length > 0 ? (
               <HeroBanner
                 items={homeHeroPool}
@@ -1698,7 +1695,7 @@ export default function App() {
               />
               <DiscoveryRows specs={homeRowSpecs} lang={tmdbLang} mediaProps={expandedMediaProps} />
             </div>
-          </>
+          </div>
         )}
       </main>
 
